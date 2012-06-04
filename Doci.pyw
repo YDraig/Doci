@@ -25,15 +25,6 @@ class MyFrame(wx.Frame):
         self.grey = wx.NamedColour("GREY")
         self.black = wx.NamedColour("BLACK")
         
-        config = ConfigParser.ConfigParser()
-        try:
-            config.readfp(open(os.path.splitext(sys.argv[0])[0] + ".ini"))
-            self.docdir = config.get("Path", "Dirs").split(",")
-            print self.docdir
-        except:
-            self.onError("Missing ini file")
-            self.onExit(self, None)
-
         wx.Frame.__init__(self, parent, title=title)
         if os.path.splitext(sys.argv[0])[1] == ".exe":
             icon = wx.Icon(sys.argv[0], wx.BITMAP_TYPE_ICO)
@@ -167,7 +158,16 @@ class MyFrame(wx.Frame):
             self.maxid = self.sql.execute('select max(id) from docs').fetchone()[0]
             if self.maxid:
                 self.display(self.maxid)
-                
+
+        config = ConfigParser.ConfigParser()
+        try:
+            config.readfp(open(os.path.splitext(sys.argv[0])[0] + ".ini"))
+            self.docdir = config.get("Path", "Dirs").split(",")
+            print self.docdir
+        except:
+            self.onError("Missing ini file")
+            self.onExit(self)
+
         self.Show()
 
     def display(self, id):
@@ -290,8 +290,9 @@ class MyFrame(wx.Frame):
         self.display(next)
     
     def onExit(self, e):
-        self.con.commit()
-        self.sql.close()
+        if self.con:
+            self.con.commit()
+            self.sql.close()
         self.Close(True)
         
     def onDesc(self, e):
