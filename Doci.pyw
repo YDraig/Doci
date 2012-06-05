@@ -17,14 +17,14 @@ import pprint
 class MyFrame(wx.Frame):
     def __init__(self, parent, title):
 
-        self.docdb = os.path.splitext(sys.argv[0])[0] + ".db"
+        self.docdb = "Doci.db"
+        self.docini = "Doci.ini"
         self.docdir = []
         self.addfiles = False
-        self.maxid = 0
         self.addid = []
         self.grey = wx.NamedColour("GREY")
         self.black = wx.NamedColour("BLACK")
-        
+
         wx.Frame.__init__(self, parent, title=title)
         if os.path.splitext(sys.argv[0])[1] == ".exe":
             icon = wx.Icon(sys.argv[0], wx.BITMAP_TYPE_ICO)
@@ -35,8 +35,8 @@ class MyFrame(wx.Frame):
         self.panel = wx.Panel(self, wx.ID_ANY)
         self.SetMinSize((500,500))
         self.statusBar = self.CreateStatusBar()
-        self.statusBar.SetFieldsCount(3)
-        self.statusBar.SetStatusWidths([30,-1,-2])
+        self.statusBar.SetFieldsCount(4)
+        self.statusBar.SetStatusWidths([50,50,-1,50])
 
         self.searchLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Find:')
         self.searchText = wx.TextCtrl(self.panel, wx.ID_ANY)
@@ -52,11 +52,7 @@ class MyFrame(wx.Frame):
         self.prevButton = wx.Button(self.panel, wx.ID_ANY, 'Prev')
         self.nextButton = wx.Button(self.panel, wx.ID_ANY, 'Next')
         self.exitButton = wx.Button(self.panel, wx.ID_EXIT, 'Exit')
-        
-        self.idLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Id:')
-        self.idText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21))
-        self.idText.SetEditable(False)
-        self.idText.SetForegroundColour(self.grey)
+
         self.fileLabel = wx.StaticText(self.panel, wx.ID_ANY, 'File:')
         self.fileText = wx.TextCtrl(self.panel, wx.ID_ANY)
         self.fileText.SetEditable(False)
@@ -65,7 +61,7 @@ class MyFrame(wx.Frame):
         self.extText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21))
         self.extText.SetEditable(False)
         self.extText.SetForegroundColour(self.grey)
-        
+
         self.dirLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Dir:')
         self.dirText = wx.TextCtrl(self.panel, wx.ID_ANY)
         self.dirText.SetEditable(False)
@@ -102,19 +98,17 @@ class MyFrame(wx.Frame):
         self.buttonBoxSizer.Add(self.prevButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.nextButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.exitButton, 0, wx.ALL, 5)
-        
-        self.propSizer.Add(self.idLabel, 0, wx.ALL, 5)
-        self.propSizer.Add(self.idText, 0, wx.ALL, 5)
+
         self.propSizer.Add(self.fileLabel, 0, wx.ALL, 5)
         self.propSizer.Add(self.fileText, 1, wx.ALL | wx.EXPAND | wx.RIGHT | wx.LEFT, 5)
         self.propSizer.Add(self.extLabel, 0, wx.ALL, 5)
         self.propSizer.Add(self.extText, 0, wx.ALL, 5)
-        
+
         self.dirSizer.Add(self.dirLabel, 0, wx.ALL, 5)
         self.dirSizer.Add(self.dirText, 1, wx.ALL | wx.EXPAND, 5)
         self.dirSizer.Add(self.dateLabel, 0, wx.ALL, 5)
         self.dirSizer.Add(self.dateText, 0, wx.ALL, 5)
-        
+
         self.descSizer.Add(self.descText, 1, wx.ALL | wx.EXPAND | wx.RIGHT, 5)
 
         self.rootSizer.Add(self.searchSizer, 0, wx.ALL | wx.EXPAND, 5)
@@ -145,7 +139,9 @@ class MyFrame(wx.Frame):
             except:
                 self.onError("Failed to create Database")
             self.sql = self.con.cursor()
-            self.sql.execute("create table docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, date REAL, added TEXT)")
+            self.sql.execute("create table docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, date REAL, seen INTEGER, added TEXT)")
+            self.sql.execute("CREATE INDEX hash on docs (hash)")
+            self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
             self.con.commit()
         else:
             # Load last entry
@@ -155,29 +151,53 @@ class MyFrame(wx.Frame):
             except:
                 self.onError("Failed to Open Database")
             self.sql = self.con.cursor()
-            self.maxid = self.sql.execute('select max(id) from docs').fetchone()[0]
-            if self.maxid:
-                self.display(self.maxid)
+            self.setMaxid(self.sql.execute('select max(id) from docs').fetchone()[0])
+            self.display(self.getMaxid())
 
         config = ConfigParser.ConfigParser()
         try:
-            config.readfp(open(os.path.splitext(sys.argv[0])[0] + ".ini"))
+            config.readfp(open(self.docini))
             self.docdir = config.get("Path", "Dirs").split(",")
-            print self.docdir
         except:
             self.onError("Missing ini file")
             self.onExit(self)
 
         self.Show()
 
+    def setId(self, sb):
+        self.statusBar.SetStatusText(str(sb),0)
+
+    def getId(self):
+        return int(self.statusBar.GetStatusText(0))
+
+    def setResults(self, sb):
+        self.statusBar.SetStatusText(str(sb),1)
+
+    def getResults(self):
+        return int(self.statusBar.GetStatusText(1))
+
+    def setMessage(self, sb):
+        self.statusBar.SetStatusText(str(sb),2)
+
+    def getMessage(self):
+        return str(self.statusBar.GetStatusText(2))
+
+    def setMaxid(self, sb):
+        self.statusBar.SetStatusText(str(sb),3)
+
+    def getMaxid(self):
+        return int(self.statusBar.GetStatusText(3))
+
     def display(self, id):
-        self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (id,))
-        row = self.sql.fetchone()
-        self.idText.SetValue(str(row["id"]))
-        self.fileText.SetValue(str(row["name"]))
-        self.extText.SetValue(str(row["ext"]))        self.dirText.SetValue(str(row["dir"]))
-        self.dateText.SetValue(str(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["date"]))))
-        self.descText.SetValue(str(row["desc"]))
+        if id:
+            self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (id,))
+            row = self.sql.fetchone()
+            self.setId(row["id"])
+            self.fileText.SetValue(str(row["name"]))
+            self.extText.SetValue(str(row["ext"]))
+            self.dirText.SetValue(str(row["dir"]))
+            self.dateText.SetValue(str(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["date"]))))
+            self.descText.SetValue(str(row["desc"]))
 
     def onError(self, message, status="Error"):
         if status == "Info":
@@ -192,10 +212,10 @@ class MyFrame(wx.Frame):
 
     def onSearch(self, e):
         pass
-    
+
     def onIndex(self, e):
         pass
-    
+
     def onOpen(self, e):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())
         pprint.pprint(filename)
@@ -245,13 +265,13 @@ class MyFrame(wx.Frame):
                         for duplicate in duplicates:
                             duplicateFile = os.path.join(duplicate["dir"], str(duplicate["name"]) + str(duplicate["ext"]))
                             if filepath != duplicateFile:
-                                self.onError("Duplicate found:\n %s\n matches existing file\n%s\n" % (filepath, duplicateFile), status="Info")
+                                self.onError("Duplicate found:\n %s\n---matches existing file---\n%s\n" % (filepath, duplicateFile), status="Info")
                         else:
                             continue
                     self.sql.execute("insert into docs (dir, name, ext, desc, hash, date, added) values (?, ?, ?, ?, ?, ?, datetime())",
                                     (dirpath, filebasename, fileext, filebasename, filehash, filedate))
                     self.addid.append(self.sql.lastrowid)
-                    self.maxid = self.sql.lastrowid
+                    self.setMaxid(self.sql.lastrowid)
         self.con.commit()
 
     def removeFiles(self):
@@ -259,10 +279,10 @@ class MyFrame(wx.Frame):
 
     def onEdit(self, e):
         self.disableButtons()
-    
+
     def onUpdate(self, e):
         #Commit the changes after updating the Desc
-        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), self.idText.GetValue()))
+        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), self.getId()))
         self.con.commit()
         if self.addfiles:
             newid = self.addid.pop(0)
@@ -274,30 +294,30 @@ class MyFrame(wx.Frame):
         else:
             self.enableButtons()
             self.addfiles = False
-    
+
     def onPrev(self, e):
-        prev = int(self.idText.GetValue()) - 1
+        prev = int(self.getId()) - 1
         if prev < 1:
             self.onError("Reached start, wraping to end", status="Info")
-            prev = self.maxid
+            prev = self.getMaxid()
         self.display(prev)
-    
+
     def onNext(self, e):
-        next = int(self.idText.GetValue()) + 1
-        if next > self.maxid:
+        next = int(self.getId()) + 1
+        if next > self.getMaxid():
             self.onError("Reached end, wraping to beginning", status="Info")
             next = 1
         self.display(next)
-    
+
     def onExit(self, e):
         if self.con:
             self.con.commit()
             self.sql.close()
         self.Close(True)
-        
+
     def onDesc(self, e):
         pass
-        
+
     def disableButtons(self):
         self.searchButton.Enable(False)
         self.indexButton.Enable(False)
@@ -308,7 +328,7 @@ class MyFrame(wx.Frame):
         self.nextButton.Enable(False)
         self.descText.SetForegroundColour(self.black)
         self.descText.SetEditable(True)
-        
+
     def enableButtons(self):
         self.searchButton.Enable(True)
         self.indexButton.Enable(True)
