@@ -15,9 +15,9 @@ setup(
             "icon_resources": [(0,"Doci.ico")],
         },
     ],
-    data_files=[('', ["Doci.ini", "msvcm90.dll", "msvcp90.dll", "msvcr90.dll", "Microsoft.VC90.CRT.manifest", "sqlite3.exe", "database.bat"])],
+    data_files=[('', ["msvcm90.dll", "msvcp90.dll", "msvcr90.dll", "Microsoft.VC90.CRT.manifest", "sqlite3.exe", "database.bat"])],
     name="Doci",
-    version="0.3",
+    version="0.4",
     author="Brinley Craig",
     description="Document Index Utility",
     #zipfile = None
