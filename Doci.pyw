@@ -146,6 +146,11 @@ class MyFrame(wx.Frame):
                             docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
             self.sql.execute("CREATE INDEX hash on docs (hash,size)")
             self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
+            self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
+            self.sql.execute("CREATE TRIGGER docs_bupdate BEFORE UPDATE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_bdelete BEFORE DELETE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_aupdate AFTER UPDATE ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
+            self.sql.execute("CREATE TRIGGER docs_ainsert AFTER INSERT ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
             self.con.commit()
         else:
             # Load last entry
@@ -224,8 +229,10 @@ class MyFrame(wx.Frame):
         # https://github.com/wimleers/fileconveyor/issues/62
         # http://stackoverflow.com/questions/2392732/sqlite-python-unicode-and-non-utf-data
         # http://stackoverflow.com/questions/2838100/pysqlite2-programmingerror-you-must-not-use-8-bit-bytestrings
-        self.statusBar.SetStatusText(sb.encode('latin-1'),3)
-        print sb.encode('latin-1')
+        try:
+            self.statusBar.SetStatusText(sb.decode('latin-1', 'replace'),3)
+        except:
+            self.onError("Unicode failure on messagebar")
 
     def display(self, id):
         if id:
@@ -247,7 +254,9 @@ class MyFrame(wx.Frame):
             dlg = wx.MessageDialog(self, message=message, caption='Query', style=wx.YES|wx.NO|wx.ICON_QUESTION)
         else:
             self.setMessage(message)
-            dlg = wx.MessageDialog(self, message="Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0), caption='Error', style=wx.OK|wx.CANCEL|wx.ICON_EXCLAMATION)
+            dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0)
+            print dlgMessage
+            dlg = wx.MessageDialog(self, message=dlgMessage, caption='Error', style=wx.OK|wx.CANCEL|wx.ICON_EXCLAMATION)
         result = dlg.ShowModal()
         dlg.Destroy()
         return(result)
@@ -260,7 +269,7 @@ class MyFrame(wx.Frame):
 
     def onOpen(self, e):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())
-        self.setMessage("Opening file: " + self.fileText.GetValue())
+        self.setMessage("Opening file: " + self.fileText.GetValue().encode('ascii', 'replace'))
         os.startfile(filename)
 
     def onCheck(self, e):
@@ -288,6 +297,7 @@ class MyFrame(wx.Frame):
         else:
             self.enableButtons()
         self.removeFiles()
+        self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
 
     def chunkReader(self, fobj, chunk_size=1024):
         """Generator that reads a file in chunks of bytes"""

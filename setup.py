@@ -17,7 +17,7 @@ setup(
     ],
     data_files=[('', ["msvcm90.dll", "msvcp90.dll", "msvcr90.dll", "Microsoft.VC90.CRT.manifest", "sqlite3.exe", "database.bat"])],
     name="Doci",
-    version="0.4",
+    version="0.6",
     author="Brinley Craig",
     description="Document Index Utility",
     #zipfile = None
