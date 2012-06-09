@@ -138,39 +138,10 @@ class MyFrame(wx.Frame):
         self.panel.SetSizer(self.rootSizer)
         self.rootSizer.Fit(self)
 
-        # Create DB file if it doesnt exist
-        if not os.path.isfile(self.docdb):
-            print "Creating DB file"
-            try:
-                self.con = sqlite3.connect(self.docdb)
-                self.con.row_factory = sqlite3.Row
-                self.con.text_factory = str # Allow unicode conversion
-            except:
-                self.onError("Failed to create Database")
-            self.sql = self.con.cursor()
-            self.sql.execute("create table docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT)")
-            self.sql.execute("""create table dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
-                            docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
-            self.sql.execute("CREATE INDEX hash on docs (hash,size)")
-            self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
-            self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
-            self.sql.execute("CREATE TRIGGER docs_bupdate BEFORE UPDATE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
-            self.sql.execute("CREATE TRIGGER docs_bdelete BEFORE DELETE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
-            self.sql.execute("CREATE TRIGGER docs_aupdate AFTER UPDATE ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
-            self.sql.execute("CREATE TRIGGER docs_ainsert AFTER INSERT ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
-            self.con.commit()
-        else:
-            # Open DB
-            try:
-                self.con = sqlite3.connect(self.docdb)
-                self.con.row_factory = sqlite3.Row
-                self.con.text_factory = str # Allow unicode conversion
-            except:
-                self.onError("Failed to Open Database")
-            self.sql = self.con.cursor()
-            self.setMaxid()
-            self.searchRecords()
-            self.displayRecord(maxid)
+        self.openDB()
+        self.setMaxid()
+        self.searchRecords()
+        self.displayRecord(1)
 
         # Create ini file if it doesnt exist
         config = ConfigParser.ConfigParser()
@@ -209,6 +180,43 @@ class MyFrame(wx.Frame):
 
         print "***Form Init***"
         self.Show()
+
+    def openDB(self):
+        # Create DB file if it doesnt exist
+        if not os.path.isfile(self.docdb):
+            print "Creating DB file"
+            try:
+                self.con = sqlite3.connect(self.docdb)
+                self.con.row_factory = sqlite3.Row
+                self.con.text_factory = str # Allow unicode conversion
+            except:
+                self.onError("Failed to create Database")
+            self.sql = self.con.cursor()
+            self.sql.execute("create table docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT)")
+            self.sql.execute("""create table dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
+                            docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
+            self.sql.execute("CREATE INDEX hash on docs (hash,size)")
+            self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
+            self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
+            self.sql.execute("CREATE TRIGGER docs_bupdate BEFORE UPDATE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_bdelete BEFORE DELETE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_aupdate AFTER UPDATE ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
+            self.sql.execute("CREATE TRIGGER docs_ainsert AFTER INSERT ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
+            self.con.commit()
+        else:
+            # Open DB
+            try:
+                self.con = sqlite3.connect(self.docdb)
+                self.con.row_factory = sqlite3.Row
+                self.con.text_factory = str # Allow unicode conversion
+            except:
+                self.onError("Failed to Open Database")
+            self.sql = self.con.cursor()
+            
+    def closeDB(self):
+        if self.con:
+            self.con.commit()
+            self.sql.close()
 
     def setIndex(self, sb):
         self.statusBar.SetStatusText(str(sb),0)
@@ -307,7 +315,12 @@ class MyFrame(wx.Frame):
 
     def onCheck(self, e):
         self.disableButtons()
-        self.addFiles(self.docdir)
+        self.closeDB() # Best to be thread safe
+        progress = wx.ProgressDialog('Checking Files', 'Please wait...')
+        startThread(self.addFiles, self.docdir, progress)
+        progress.ShowModal()
+        self.openDB()
+        
         dupes = self.sql.execute("select max(id) from dupes").fetchone()[0]
         if dupes:
             self.onError("Found %s Duplicate Files, Ignoring them for now" % dupes, status="Info")
@@ -341,13 +354,15 @@ class MyFrame(wx.Frame):
                 return
             yield chunk
 
-    def addFiles(self, paths, hash=hashlib.sha1):
+    def addFiles(self, paths, progress, hash=hashlib.sha1):
+        # Open DB (thread safe)
+        self.openDB()
         for path in paths:
             if not os.path.isdir(path):
                 self.onError("Missing Directory: %s" % path, status="Info")
                 continue
             for dirpath, dirnames, filenames in os.walk(path):
-                self.setMessage(dirpath)
+                progress.Pulse(dirpath)
                 for file in filenames:
                     filepath = os.path.join(dirpath, file)
                     filebasename = os.path.splitext(file)[0]
@@ -396,7 +411,8 @@ class MyFrame(wx.Frame):
                     except:
                         if self.onError("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                             return
-        self.con.commit()
+        self.closeDB()
+        wx.CallAfter(progress.Destroy)
 
     def removeFiles(self):
         pass
@@ -420,9 +436,7 @@ class MyFrame(wx.Frame):
             self.addfiles = False
 
     def onExit(self, e):
-        if self.con:
-            self.con.commit()
-            self.sql.close()
+        self.closeDB()
         self.Close(True)
 
     def onId(self, e):
@@ -457,6 +471,12 @@ class MyFrame(wx.Frame):
         self.nextButton.Enable(True)
         self.descText.SetForegroundColour(self.grey)
         self.descText.SetEditable(False)
+
+def startThread(func, *args): # helper method to run a function in another thread
+    thread = threading.Thread(target=func, args=args)
+    thread.setDaemon(True)
+    thread.start()
+
 
 if __name__ == '__main__':
     try:
