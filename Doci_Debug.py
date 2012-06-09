@@ -10,7 +10,7 @@
 # Licence:     GPL V2
 #-------------------------------------------------------------------------------
 import sqlite3, traceback, hashlib
-import os, sys, wx, time
+import os, sys, wx, time, datetime
 import ConfigParser, threading
 import pprint
 
@@ -25,12 +25,14 @@ class MyFrame(wx.Frame):
         self.results = []
         self.grey = wx.NamedColour("GREY")
         self.black = wx.NamedColour("BLACK")
+        self.workerRun = False
+        self.workerDir = ""
 
         wx.Frame.__init__(self, parent, title=title)
         if os.path.splitext(sys.argv[0])[1] == ".exe":
             icon = wx.Icon(sys.argv[0], wx.BITMAP_TYPE_ICO)
         else:
-            icon = wx.Icon(os.path.splitext(sys.argv[0])[0] + ".ico", wx.BITMAP_TYPE_ICO)
+            icon = wx.Icon("Doci.ico", wx.BITMAP_TYPE_ICO)
         self.SetIcon(icon)
 
         self.panel = wx.Panel(self, wx.ID_ANY)
@@ -142,12 +144,12 @@ class MyFrame(wx.Frame):
         self.setMaxid()
         self.searchRecords()
         self.displayRecord(1)
+        self.Show()
 
         # Create ini file if it doesnt exist
         config = ConfigParser.ConfigParser()
         if not os.path.isfile(self.docini):
             print "Creating ini file"
-            # this gives an error in the exe as __file__ doesnt exist?
             currentDir = os.getcwd()
             dlg = wx.DirDialog(self, "Choose documents directory", currentDir,style=wx.DD_DEFAULT_STYLE)
             if dlg.ShowModal() == wx.ID_OK:
@@ -179,7 +181,6 @@ class MyFrame(wx.Frame):
                 self.onExit(self)
 
         print "***Form Init***"
-        self.Show()
 
     def openDB(self):
         # Create DB file if it doesnt exist
@@ -257,7 +258,7 @@ class MyFrame(wx.Frame):
         self.setResults(len(self.results))        
 
     def displayRecord(self, index):
-        if index:
+        if index and self.results:
             id = self.results[index - 1]
             self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (id,))
             row = self.sql.fetchone()
@@ -316,9 +317,9 @@ class MyFrame(wx.Frame):
     def onCheck(self, e):
         self.disableButtons()
         self.closeDB() # Best to be thread safe
-        progress = wx.ProgressDialog('Checking Files', 'Please wait...')
-        startThread(self.addFiles, self.docdir, progress)
-        progress.ShowModal()
+        self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
+        startThread(self.addFiles, self.docdir)
+        self.progress.ShowModal()
         self.openDB()
         
         dupes = self.sql.execute("select max(id) from dupes").fetchone()[0]
@@ -332,7 +333,6 @@ class MyFrame(wx.Frame):
             if self.onError("Found %s missing files\nPurge from database?" % missing, status="Query") == wx.ID_YES:
                     self.sql.execute("delete from docs where seen <>1")
         self.sql.execute("update docs set seen=''")
-        self.searchRecords()
         if self.addid:
             self.displayRecord(self.results.index(self.addid.pop(0))+1) # Idex of 0 based array
             if self.onError("Found %s new files\nBulk update files?" % (len(self.addid) + 1), status="Query") == wx.ID_YES:
@@ -343,8 +343,17 @@ class MyFrame(wx.Frame):
                 self.enableButtons()
         else:
             self.enableButtons()
+        self.searchRecords()
         self.removeFiles()
         self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
+
+    def updateProgress(self):
+        if self.workerRun == True:
+            (run, skip) = self.progress.Pulse(self.workerDir)
+            if run == False:
+                self.workerRun = False
+            else:
+                threading.Timer(0.2, self.updateProgress).start()
 
     def chunkReader(self, fobj, chunk_size=8192):
         """Generator that reads a file in chunks of bytes"""
@@ -354,15 +363,21 @@ class MyFrame(wx.Frame):
                 return
             yield chunk
 
-    def addFiles(self, paths, progress, hash=hashlib.sha1):
+    def addFiles(self, paths, hash=hashlib.sha1):
+        self.workerRun = True
+        threading.Timer(0.2, self.updateProgress).start()
         # Open DB (thread safe)
         self.openDB()
         for path in paths:
+            if self.workerRun == False:
+                break
             if not os.path.isdir(path):
                 self.onError("Missing Directory: %s" % path, status="Info")
                 continue
             for dirpath, dirnames, filenames in os.walk(path):
-                progress.Pulse(dirpath)
+                self.workerDir = dirpath
+                if self.workerRun == False:
+                    break
                 for file in filenames:
                     filepath = os.path.join(dirpath, file)
                     filebasename = os.path.splitext(file)[0]
@@ -371,6 +386,8 @@ class MyFrame(wx.Frame):
                     hashobj = hash()
                     for chunk in self.chunkReader(open(filepath, 'rb')):
                         hashobj.update(chunk)
+                        if self.workerRun == False:
+                            break                        
                     filehash = hashobj.hexdigest()
                     filesize = os.path.getsize(filepath)
                     self.sql.execute('select id, dir, name, ext from docs where hash=? and size=?', (filehash,filesize))
@@ -412,7 +429,8 @@ class MyFrame(wx.Frame):
                         if self.onError("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                             return
         self.closeDB()
-        wx.CallAfter(progress.Destroy)
+        self.workerRun = False
+        wx.CallAfter(self.progress.Destroy)
 
     def removeFiles(self):
         pass
@@ -472,11 +490,11 @@ class MyFrame(wx.Frame):
         self.descText.SetForegroundColour(self.grey)
         self.descText.SetEditable(False)
 
+
 def startThread(func, *args): # helper method to run a function in another thread
     thread = threading.Thread(target=func, args=args)
     thread.setDaemon(True)
     thread.start()
-
 
 if __name__ == '__main__':
     try:
