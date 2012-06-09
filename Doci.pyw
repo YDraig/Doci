@@ -168,10 +168,8 @@ class MyFrame(wx.Frame):
             except:
                 self.onError("Failed to Open Database")
             self.sql = self.con.cursor()
-            maxid = self.sql.execute('select max(id) from docs').fetchone()[0]
-            if maxid:
-                self.setMaxid(maxid)
-                self.searchRecords()
+            self.setMaxid()
+            self.searchRecords()
             self.displayRecord(maxid)
 
         # Create ini file if it doesnt exist
@@ -226,8 +224,11 @@ class MyFrame(wx.Frame):
         if self.statusBar.GetStatusText(1) != 'None':
             return int(self.statusBar.GetStatusText(1))
 
-    def setMaxid(self, sb):
-        self.statusBar.SetStatusText(str(sb),2)
+    def setMaxid(self, maxid=""):
+        if maxid == "":
+            maxid = self.sql.execute('select max(id) from docs').fetchone()[0]
+        if maxid:
+            self.statusBar.SetStatusText(str(maxid),2)
 
     def setMessage(self, sb):
         # Unicode Sux, probably a better way to do this, but this currently works, REF:
