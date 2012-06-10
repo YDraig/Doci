@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# coding: utf-8
 #-------------------------------------------------------------------------------
 # Name:        Doci
 # Purpose:      Create html index for Documents
@@ -59,7 +60,7 @@ class MyFrame(wx.Frame):
         self.idLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Id:')
         self.idText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21), style=wx.TE_PROCESS_ENTER)
         self.idText.SetEditable(True)
-        self.fileLabel = wx.StaticText(self.panel, wx.ID_ANY, 'File:')
+        self.fileLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Name:')
         self.fileText = wx.TextCtrl(self.panel, wx.ID_ANY)
         self.fileText.SetEditable(False)
         self.fileText.SetForegroundColour(self.grey)
@@ -67,6 +68,7 @@ class MyFrame(wx.Frame):
         self.extText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21))
         self.extText.SetEditable(False)
         self.extText.SetForegroundColour(self.grey)
+        #self.categoryList = wx.ListBox(choices=[], id=wxID_FRAME1LISTBOX1, name='listBox1', parent=self, pos=wx.Point(8, 48), size=wx.Size(184, 256), style=0)
 
         self.dirLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Dir:')
         self.dirText = wx.TextCtrl(self.panel, wx.ID_ANY)
@@ -76,7 +78,6 @@ class MyFrame(wx.Frame):
         self.dateText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(120,21))
         self.dateText.SetEditable(False)
         self.dateText.SetForegroundColour(self.grey)
-        #self.dateText.Enable(False)
 
         self.descBox = wx.StaticBox(self.panel, wx.ID_ANY, 'Description')
         self.descText = wx.TextCtrl(self.panel, wx.ID_ANY, style=wx.TE_MULTILINE ) #|wx.TE_PROCESS_TAB
@@ -189,13 +190,17 @@ class MyFrame(wx.Frame):
             try:
                 self.con = sqlite3.connect(self.docdb)
                 self.con.row_factory = sqlite3.Row
-                self.con.text_factory = str # Allow unicode conversion
+                self.con.text_factory = unicode # Allow unicode conversion
             except:
                 self.onError("Failed to create Database")
             self.sql = self.con.cursor()
-            self.sql.execute("create table docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT)")
-            self.sql.execute("""create table dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
+            self.sql.execute("""CREATE TABLE docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL,
+            categoryid INTEGER, seen INTEGER, added TEXT, FOREIGN KEY(categoryid) REFERENCES categories(id))""")
+            self.sql.execute("""CREATE TABLE dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
                             docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
+            self.sql.execute("CREATE TABLE categories (id INTEGER PRIMARY KEY, category TEXT, display INTEGER)")
+            for (cat,display) in (("Standards", 1), ("Drawings",2)):
+                self.sql.execute("INSERT INTO categories (category, display) VALUES (?, ?)", (cat,display))
             self.sql.execute("CREATE INDEX hash on docs (hash,size)")
             self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
             self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
@@ -209,7 +214,7 @@ class MyFrame(wx.Frame):
             try:
                 self.con = sqlite3.connect(self.docdb)
                 self.con.row_factory = sqlite3.Row
-                self.con.text_factory = str # Allow unicode conversion
+                self.con.text_factory = unicode # Allow unicode conversion
             except:
                 self.onError("Failed to Open Database")
             self.sql = self.con.cursor()
@@ -241,14 +246,14 @@ class MyFrame(wx.Frame):
 
     def setMessage(self, sb):
         # Unicode Sux, probably a better way to do this, but this currently works, REF:
+        # http://docs.python.org/howto/unicode#unicode-literals-in-python-source-code
         # http://docs.python.org/howto/unicode.html#unicode-filenames
-        # https://github.com/wimleers/fileconveyor/issues/62
         # http://stackoverflow.com/questions/2392732/sqlite-python-unicode-and-non-utf-data
         # http://stackoverflow.com/questions/2838100/pysqlite2-programmingerror-you-must-not-use-8-bit-bytestrings
         try:
-            self.statusBar.SetStatusText(sb.decode('latin-1', 'replace'),3)
+            self.statusBar.SetStatusText(sb,3)
         except:
-            self.onError("Unicode failure on messagebar")
+            self.onError("Failure on messagebar")
 
     def searchRecords(self, search=""):
         if search != "":
@@ -257,18 +262,20 @@ class MyFrame(wx.Frame):
             self.results = [element[0] for element in self.sql.execute('select id from docs').fetchall()]
         self.setResults(len(self.results))        
 
-    def displayRecord(self, index):
-        if index and self.results:
+    def displayRecord(self, index=None):
+        if self.results:
+            if not index:
+                index=1
             id = self.results[index - 1]
             self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (id,))
             row = self.sql.fetchone()
             self.setIndex(index)
             self.idText.SetValue(str(row["id"]))
-            self.fileText.SetValue(str(row["name"]))
-            self.extText.SetValue(str(row["ext"]))
-            self.dirText.SetValue(str(row["dir"]))
-            self.dateText.SetValue(str(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["date"]))))
-            self.descText.SetValue(str(row["desc"]))
+            self.fileText.SetValue(row["name"])
+            self.extText.SetValue(row["ext"])
+            self.dirText.SetValue(row["dir"])
+            self.dateText.SetValue(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(row["date"])))
+            self.descText.SetValue(row["desc"])
 
     def onPrev(self, e):
         if self.getIndex():
@@ -293,6 +300,9 @@ class MyFrame(wx.Frame):
         elif status == "Query":
             self.setMessage(message)
             dlg = wx.MessageDialog(self, message=message, caption='Query', style=wx.YES|wx.NO|wx.ICON_QUESTION)
+        elif status == "Warning":
+            print "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message
+            return
         else:
             self.setMessage(message)
             dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0)
@@ -304,14 +314,14 @@ class MyFrame(wx.Frame):
 
     def onSearch(self, e):
         self.searchRecords(self.searchText.GetValue())
-        self.displayRecord(1)
+        self.displayRecord()
 
     def onIndex(self, e):
         pass
 
     def onOpen(self, e):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())
-        self.setMessage("Opening file: " + self.fileText.GetValue().encode('ascii', 'replace'))
+        self.setMessage("Opening file: " + self.fileText.GetValue())
         os.startfile(filename)
 
     def onCheck(self, e):
@@ -326,15 +336,16 @@ class MyFrame(wx.Frame):
         if dupes:
             self.onError("Found %s Duplicate Files, Ignoring them for now" % dupes, status="Info")
             # We should list these and let the user delete them
+            self.removeFiles()
             self.sql.execute("delete from dupes")
             self.con.commit()
         missing = self.sql.execute("select count(*) from docs where seen <> 1").fetchone()[0]
         if missing:
             if self.onError("Found %s missing files\nPurge from database?" % missing, status="Query") == wx.ID_YES:
                     self.sql.execute("delete from docs where seen <>1")
-        self.sql.execute("update docs set seen=''")
-        if self.addid:
-            self.displayRecord(self.results.index(self.addid.pop(0))+1) # Idex of 0 based array
+        self.searchRecords() # Would be nice to do this later, but needs te results for below
+        if self.addid and self.results:
+            self.displayRecord(self.results.index(self.addid.pop(0))+1) # Index of 0 based array
             if self.onError("Found %s new files\nBulk update files?" % (len(self.addid) + 1), status="Query") == wx.ID_YES:
                 self.addfiles = True
             else:
@@ -343,8 +354,8 @@ class MyFrame(wx.Frame):
                 self.enableButtons()
         else:
             self.enableButtons()
-        self.searchRecords()
-        self.removeFiles()
+        self.sql.execute("update docs set seen=''")
+        self.con.commit()
         self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
 
     def updateProgress(self):
@@ -393,7 +404,7 @@ class MyFrame(wx.Frame):
                     self.sql.execute('select id, dir, name, ext from docs where hash=? and size=?', (filehash,filesize))
                     duplicate = self.sql.fetchone()
                     if duplicate:
-                        duplicateFile = os.path.join(duplicate["dir"], str(duplicate["name"]) + str(duplicate["ext"]))
+                        duplicateFile = os.path.join(duplicate["dir"], duplicate["name"] + duplicate["ext"])
                         if filepath != duplicateFile:
                             if not os.path.isfile(duplicateFile):
                                 # File has moved update record
@@ -439,8 +450,9 @@ class MyFrame(wx.Frame):
         self.disableButtons()
 
     def onUpdate(self, e):
+        id = self.results[self.getIndex() - 1]
         #Commit the changes after updating the Desc
-        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), self.getIndex()))
+        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), id))
         self.con.commit()
         if self.addfiles:
             newid = self.addid.pop(0)
