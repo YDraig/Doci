@@ -38,9 +38,12 @@ class MyFrame(wx.Frame):
 
         self.panel = wx.Panel(self, wx.ID_ANY)
         self.SetMinSize((500,500))
+        
         self.statusBar = self.CreateStatusBar()
-        self.statusBar.SetFieldsCount(4)
-        self.statusBar.SetStatusWidths([50,50,50,-1])
+        self.statusBar.SetFieldsCount(3)
+        self.statusBar.SetStatusWidths([85,-1,60,])
+        self.statusBar.SetStatusText("0/0", 0)
+        self.statusBarClear = threading.Timer(2.0, self.setMessage)
 
         self.searchLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Find:')
         self.searchText = wx.TextCtrl(self.panel, wx.ID_ANY, style=wx.TE_PROCESS_ENTER)
@@ -69,6 +72,8 @@ class MyFrame(wx.Frame):
         self.extText.SetEditable(False)
         self.extText.SetForegroundColour(self.grey)
         #self.categoryList = wx.ListBox(choices=[], id=wxID_FRAME1LISTBOX1, name='listBox1', parent=self, pos=wx.Point(8, 48), size=wx.Size(184, 256), style=0)
+        #id1 = wx.NewId()
+        #wx.RegisterId(id1)        
 
         self.dirLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Dir:')
         self.dirText = wx.TextCtrl(self.panel, wx.ID_ANY)
@@ -160,7 +165,7 @@ class MyFrame(wx.Frame):
                 else:
                     self.docdir.append(selectedDir)
             else:
-                self.onError("Unable to continue without ini file", "Info")
+                self.displayMessage("Unable to continue without ini file", "Info")
                 self.onExit(self)
                 return
                 
@@ -171,14 +176,14 @@ class MyFrame(wx.Frame):
                     config.write(configfile)
                 configfile.close()
             except:
-                self.onError("Error Creating ini file")
+                self.displayMessage("Error Creating ini file")
                 self.onExit(self)
         else:
             try:
                 config.readfp(open(self.docini))
                 self.docdir.extend(eval(config.get("Path", "Dirs")))
             except:
-                self.onError("Missing ini file")
+                self.displayMessage("Missing ini file")
                 self.onExit(self)
 
         print "***Form Init***"
@@ -192,7 +197,7 @@ class MyFrame(wx.Frame):
                 self.con.row_factory = sqlite3.Row
                 self.con.text_factory = unicode # Allow unicode conversion
             except:
-                self.onError("Failed to create Database")
+                self.displayMessage("Failed to create Database")
             self.sql = self.con.cursor()
             self.sql.execute("""CREATE TABLE docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL,
             categoryid INTEGER, seen INTEGER, added TEXT, FOREIGN KEY(categoryid) REFERENCES categories(id))""")
@@ -216,7 +221,7 @@ class MyFrame(wx.Frame):
                 self.con.row_factory = sqlite3.Row
                 self.con.text_factory = unicode # Allow unicode conversion
             except:
-                self.onError("Failed to Open Database")
+                self.displayMessage("Failed to Open Database")
             self.sql = self.con.cursor()
             
     def closeDB(self):
@@ -224,19 +229,29 @@ class MyFrame(wx.Frame):
             self.con.commit()
             self.sql.close()
 
-    def setIndex(self, sb):
-        self.statusBar.SetStatusText(str(sb),0)
+    def setIndex(self, index):
+        (oldindex, results) = self.statusBar.GetStatusText(0).split("/")
+        self.statusBar.SetStatusText(str(index) + "/" + str(results),0)
 
     def getIndex(self):
         if self.statusBar.GetStatusText(0) != 'None':
-            return int(self.statusBar.GetStatusText(0))
+            (index, results) = self.statusBar.GetStatusText(0).split("/")
+            return int(index)
+        
+    def getId(self, index=None):
+        if not index:
+            index = self.getIndex()
+        if index and self.results:
+            return self.results[index - 1]
 
-    def setResults(self, sb):
-        self.statusBar.SetStatusText(str(sb),1)
+    def setResults(self, results):
+        (index, oldresults) = self.statusBar.GetStatusText(0).split("/")
+        self.statusBar.SetStatusText(str(index) + "/" + str(results),0)
 
     def getResults(self):
         if self.statusBar.GetStatusText(1) != 'None':
-            return int(self.statusBar.GetStatusText(1))
+            (index, results) = self.statusBar.GetStatusText(0).split("/")
+            return int(results)
 
     def setMaxid(self, maxid=""):
         if maxid == "":
@@ -244,16 +259,38 @@ class MyFrame(wx.Frame):
         if maxid:
             self.statusBar.SetStatusText(str(maxid),2)
 
-    def setMessage(self, sb):
-        # Unicode Sux, probably a better way to do this, but this currently works, REF:
-        # http://docs.python.org/howto/unicode#unicode-literals-in-python-source-code
-        # http://docs.python.org/howto/unicode.html#unicode-filenames
-        # http://stackoverflow.com/questions/2392732/sqlite-python-unicode-and-non-utf-data
-        # http://stackoverflow.com/questions/2838100/pysqlite2-programmingerror-you-must-not-use-8-bit-bytestrings
+    def setMessage(self, message=None):
+        if not message:
+            message = u""
+        else:
+            print message
+        if not self.thread.isAlive():
+            self.statusBarClear.cancel()
+            self.statusBarClear.start()
         try:
-            self.statusBar.SetStatusText(sb,3)
+            self.statusBar.SetStatusText(message,1)
         except:
-            self.onError("Failure on messagebar")
+            self.displayMessage("Failure on messagebar")
+
+    def displayMessage(self, message, status="Error"):
+        if status == "Info":
+            dlg = wx.MessageDialog(self, message=message, caption='Info', style=wx.OK|wx.ICON_INFORMATION)
+        elif status == "Query":
+            dlg = wx.MessageDialog(self, message=message, caption='Query', style=wx.YES_NO|wx.ICON_QUESTION)
+        elif status == "Duplicate":
+            dlg = wx.MessageDialog(self, message=message, caption='Delete Duplicate File?', style=wx.YES_NO|wx.CANCEL|wx.ICON_EXCLAMATION)
+        elif status == "Warning":
+            self.setMessage(message)
+            print "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message
+            return
+        else:
+            self.setMessage(message)
+            dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0)
+            print dlgMessage
+            dlg = wx.MessageDialog(self, message=dlgMessage, caption='Error', style=wx.OK|wx.CANCEL|wx.ICON_ERROR)
+        result = dlg.ShowModal()
+        dlg.Destroy()
+        return(result)
 
     def searchRecords(self, search=""):
         if search != "":
@@ -266,8 +303,7 @@ class MyFrame(wx.Frame):
         if self.results:
             if not index:
                 index=1
-            id = self.results[index - 1]
-            self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (id,))
+            self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (self.getId(index),))
             row = self.sql.fetchone()
             self.setIndex(index)
             self.idText.SetValue(str(row["id"]))
@@ -281,7 +317,7 @@ class MyFrame(wx.Frame):
         if self.getIndex():
             prev = self.getIndex() - 1
             if prev < 1:
-                self.onError("Reached start, wraping to end", status="Info")
+                self.displayMessage("Reached start, wraping to end", status="Info")
                 prev = self.getResults()
             self.displayRecord(prev)
 
@@ -289,28 +325,9 @@ class MyFrame(wx.Frame):
         if self.getIndex():
             next = self.getIndex() + 1
             if next > self.getResults():
-                self.onError("Reached end, wraping to beginning", status="Info")
+                self.displayMessage("Reached end, wraping to beginning", status="Info")
                 next = 1
             self.displayRecord(next)
-
-    def onError(self, message, status="Error"):
-        if status == "Info":
-            self.setMessage(message)
-            dlg = wx.MessageDialog(self, message=message, caption='Info', style=wx.OK|wx.ICON_INFORMATION)
-        elif status == "Query":
-            self.setMessage(message)
-            dlg = wx.MessageDialog(self, message=message, caption='Query', style=wx.YES|wx.NO|wx.ICON_QUESTION)
-        elif status == "Warning":
-            print "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message
-            return
-        else:
-            self.setMessage(message)
-            dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0)
-            print dlgMessage
-            dlg = wx.MessageDialog(self, message=dlgMessage, caption='Error', style=wx.OK|wx.CANCEL|wx.ICON_EXCLAMATION)
-        result = dlg.ShowModal()
-        dlg.Destroy()
-        return(result)
 
     def onSearch(self, e):
         self.searchRecords(self.searchText.GetValue())
@@ -328,25 +345,25 @@ class MyFrame(wx.Frame):
         self.disableButtons()
         self.closeDB() # Best to be thread safe
         self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
-        startThread(self.addFiles, self.docdir)
+        self.thread = startThread(self.addFiles, self.docdir)
         self.progress.ShowModal()
         self.openDB()
         
         dupes = self.sql.execute("select max(id) from dupes").fetchone()[0]
         if dupes:
-            self.onError("Found %s Duplicate Files, Ignoring them for now" % dupes, status="Info")
-            # We should list these and let the user delete them
-            self.removeFiles()
-            self.sql.execute("delete from dupes")
-            self.con.commit()
+            if self.displayMessage("Found %s Duplicate Files, Ignore them?" % dupes, status="Query") == wx.ID_YES:
+                self.sql.execute("delete from dupes")
+                self.con.commit()
+            else:
+                self.removeFiles()
         missing = self.sql.execute("select count(*) from docs where seen <> 1").fetchone()[0]
         if missing:
-            if self.onError("Found %s missing files\nPurge from database?" % missing, status="Query") == wx.ID_YES:
+            if self.displayMessage("Found %s missing files\nPurge from database?" % missing, status="Query") == wx.ID_YES:
                     self.sql.execute("delete from docs where seen <>1")
-        self.searchRecords() # Would be nice to do this later, but needs te results for below
+        self.searchRecords() # Would be nice to do this later, but needs the results for below
         if self.addid and self.results:
             self.displayRecord(self.results.index(self.addid.pop(0))+1) # Index of 0 based array
-            if self.onError("Found %s new files\nBulk update files?" % (len(self.addid) + 1), status="Query") == wx.ID_YES:
+            if self.displayMessage("Found %s new files\nBulk update files?" % (len(self.addid) + 1), status="Query") == wx.ID_YES:
                 self.addfiles = True
             else:
                 self.addfiles = False
@@ -357,6 +374,40 @@ class MyFrame(wx.Frame):
         self.sql.execute("update docs set seen=''")
         self.con.commit()
         self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
+
+    def removeFiles(self):
+        self.sql.execute("""select dupes.id did, dupes.dir ddir, dupes.name dname, dupes.ext dext, dupes.docsid oid, docs.dir odir, docs.name oname, docs.ext oext
+        from dupes,docs where dupes.docsid=docs.id""")
+        for dupe in self.sql.fetchall():
+            message = "YES to Delete:\n" + dupe["ddir"] + "\n" + dupe["dname"] + dupe["dext"] + "\n\n"
+            message += "NO to Delete:\n" + dupe["odir"] + "\n" + dupe["oname"] + dupe["oext"] + "\n\n"
+            message += "***WARNING: This will PERMANENTLY delete the file from the PC!***"
+            removeFile = self.displayMessage(message , "Duplicate")
+            if removeFile == wx.ID_YES:
+                filename = os.path.join(dupe["ddir"], dupe["dname"] + dupe["dext"])
+                self.setMessage(u"Deleting File: " + filename)
+                try:
+                    os.remove(filename)
+                except:
+                    self.displayMessage("Error removing file: " + filename)
+                finally:
+                    self.sql.execute("delete from dupes where id=?", (dupe["did"],))
+            elif removeFile == wx.ID_NO:
+                filename = os.path.join(dupe["odir"], dupe["oname"] + dupe["oext"])
+                self.setMessage(u"Deleting File: " + filename)
+                try:
+                    os.remove(filename)
+                    self.sql.execute("update docs set dir=?, name=?, ext=? where id=?", (dupe["ddir"], dupe["dname"], dupe["dext"], dupe["oid"]))
+                except:
+                    self.displayMessage("Error removing file: " + filename)
+                finally:
+                    self.sql.execute("delete from dupes where id=?", (dupe["did"],))
+            else:
+                self.setMessage("Ignoring Duplicates")
+                self.sql.execute("delete from dupes")
+                self.con.commit()
+                return
+        self.con.commit()
 
     def updateProgress(self):
         if self.workerRun == True:
@@ -383,7 +434,7 @@ class MyFrame(wx.Frame):
             if self.workerRun == False:
                 break
             if not os.path.isdir(path):
-                self.onError("Missing Directory: %s" % path, status="Info")
+                self.displayMessage("Missing Directory: %s" % path, status="Info")
                 continue
             for dirpath, dirnames, filenames in os.walk(path):
                 self.workerDir = dirpath
@@ -413,7 +464,7 @@ class MyFrame(wx.Frame):
                                 try:
                                     self.sql.execute("update docs set dir=?,name=?,ext=? where id=?", (dirpath, filebasename, fileext, duplicate["id"]))
                                 except:
-                                    if self.onError("Failed to update file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
+                                    if self.displayMessage("Failed to update file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                                         return
                             else:
                                 # Duplicate File
@@ -424,7 +475,7 @@ class MyFrame(wx.Frame):
                                     self.sql.execute("insert into dupes (dir, name, ext, desc, hash, size, date, seen, added, docsid) values (?, ?, ?, ?, ?, ?, ?, 1, datetime(),?)",
                                                     (dirpath, filebasename, fileext, filebasename, filehash, filesize, filedate, duplicate["id"]))
                                 except:
-                                    if self.onError("Failed to mark duplicate file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
+                                    if self.displayMessage("Failed to mark duplicate file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                                         return
                             continue
                         else:
@@ -437,22 +488,19 @@ class MyFrame(wx.Frame):
                         self.addid.append(self.sql.lastrowid)
                         self.setMaxid(self.sql.lastrowid)
                     except:
-                        if self.onError("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
+                        if self.displayMessage("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                             return
         self.closeDB()
         self.workerRun = False
+        self.setMessage()
         wx.CallAfter(self.progress.Destroy)
-
-    def removeFiles(self):
-        pass
 
     def onEdit(self, e):
         self.disableButtons()
 
     def onUpdate(self, e):
-        id = self.results[self.getIndex() - 1]
         #Commit the changes after updating the Desc
-        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), id))
+        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), self.getId()))
         self.con.commit()
         if self.addfiles:
             newid = self.addid.pop(0)
@@ -507,6 +555,7 @@ def startThread(func, *args): # helper method to run a function in another threa
     thread = threading.Thread(target=func, args=args)
     thread.setDaemon(True)
     thread.start()
+    return thread
 
 if __name__ == '__main__':
     try:
