@@ -4,16 +4,16 @@ import py2exe
 exeversion = "0.11"
 setup(
     options = {'py2exe': {'bundle_files': 2, "dll_excludes": ["w9xpopen.exe"]}},
-    windows = [
-        {
-            "script": "Doci.pyw",
-            "icon_resources": [(0,"Doci.ico")],
-            "other_resources": [(u"VERSION",1,exeversion)],
-        },
-    ],
+    # windows = [
+        # {
+            # "script": "Doci.pyw",
+            # "icon_resources": [(0,"Doci.ico")],
+            # "other_resources": [(u"VERSION",1,exeversion)],
+        # },
+    # ],
 	console = [
         {
-            "script": "Doci_Debug.py",
+            "script": "Doci.py",
             "icon_resources": [(0,"Doci.ico")],
             "other_resources": [(u"VERSION",1,exeversion)],
         },

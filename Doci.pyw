@@ -32,6 +32,8 @@ class MyFrame(wx.Frame):
         self.workerAbort = threading.Event()
         self.workerDir = Queue.Queue(maxsize=0)
         self.messageQueue = Queue.Queue(maxsize=0)
+        self.messageCount = 0
+        self.maxidQueue = Queue.Queue(maxsize=1)
         self.thread = None
         self.statusBarClear = None
 
@@ -157,7 +159,7 @@ class MyFrame(wx.Frame):
         self.panel.SetSizer(self.rootSizer)
         self.rootSizer.Fit(self)
 
-        self.messageTimer.Start(3000)
+        self.messageTimer.Start(500)
         self.openDB()
         self.setMaxid()
         self.searchRecords()
@@ -272,13 +274,21 @@ class MyFrame(wx.Frame):
             self.statusBar.SetStatusText(str(maxid),2)
 
     def setMessage(self, e):
+        message = None
+        self.messageCount += 1
+        queuedepth = self.messageQueue.qsize()
         try:
             message = self.messageQueue.get_nowait()
-            print message
         except Queue.Empty:
-            message = u""
+            if self.messageCount > 5:
+                message = u""
         try:
-            self.statusBar.SetStatusText(message,1)
+            if message != None:
+                self.messageCount = 0
+                if len(message):
+                    print message
+                    message = str(queuedepth) + ": " + message
+                self.statusBar.SetStatusText(message,1)
         except:
             self.displayMessage("Failure on messagebar")
 
@@ -430,7 +440,17 @@ class MyFrame(wx.Frame):
     def updateProgress(self):
         if self.workerRun.isSet():
             try:
+                maxId = self.maxidQueue.get_nowait()
+                wx.MutexGuiEnter()
+                self.setMaxid(maxId)
+                wx.MutexGuiLeave()
+                self.maxidQueue.task_done()
+            except Queue.Empty:
+                pass
+            try:
                 currentDir = self.workerDir.get_nowait()
+                if len(currentDir) > 30:
+                    currentDir = currentDir[:10] + "..." + currentDir[-20:]
                 (run, skip) = self.progress.Pulse(currentDir)
                 self.workerDir.task_done()
             except Queue.Empty:
@@ -494,7 +514,8 @@ class MyFrame(wx.Frame):
                                     self.sql.execute("update docs set dir=?,name=?,ext=? where id=?", (dirpath, filebasename, fileext, duplicate["id"]))
                                 except:
                                     if self.displayMessage("Failed to update file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
-                                        return
+                                        self.workerRun.clear()
+                                        break
                             else:
                                 # Duplicate File
                                 self.messageQueue.put_nowait("Found Duplicate: %s" % filepath)
@@ -504,7 +525,8 @@ class MyFrame(wx.Frame):
                                                     (dirpath, filebasename, fileext, filebasename, filehash, filesize, filedate, duplicate["id"]))
                                 except:
                                     if self.displayMessage("Failed to mark duplicate file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
-                                        return
+                                        self.workerRun.clear()
+                                        break
                             continue
                         else:
                             # Found Existing File, update the seen value
@@ -515,11 +537,16 @@ class MyFrame(wx.Frame):
                         self.sql.execute("insert into docs (dir, name, ext, desc, hash, size, date, seen, added) values (?, ?, ?, ?, ?, ?, ?, 1, datetime())",
                                         (dirpath, filebasename, fileext, filebasename, filehash, filesize, filedate))
                         self.addid.append(self.sql.lastrowid)
-                        self.setMaxid(self.sql.lastrowid)
+                        try:
+                            self.maxidQueue.put_nowait(self.sql.lastrowid)
+                        except Queue.Full:
+                            pass
                     except:
                         if self.displayMessage("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
-                            return
+                            self.workerRun.clear()
+                            break
         self.closeDB()
+        self.workerDir.queue.clear()
         self.workerRun.clear()
         wx.CallAfter(self.progress.Destroy)
 
