@@ -1,7 +1,7 @@
 from distutils.core import setup
 import py2exe
 
-exeversion = "0.11"
+exeversion = "0.14"
 setup(
     options = {'py2exe': {'bundle_files': 2, "dll_excludes": ["w9xpopen.exe"]}},
     # windows = [
@@ -13,7 +13,7 @@ setup(
     # ],
 	console = [
         {
-            "script": "Doci.py",
+            "script": "Doci.pyw",
             "icon_resources": [(0,"Doci.ico")],
             "other_resources": [(u"VERSION",1,exeversion)],
         },

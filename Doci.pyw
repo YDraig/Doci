@@ -72,10 +72,10 @@ class MyFrame(wx.Frame):
         self.nextButton = wx.Button(self.panel, wx.ID_ANY, 'Next')
         self.exitButton = wx.Button(self.panel, wx.ID_EXIT, 'Exit')
 
-        self.idLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Id:')
+        self.idLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Id:', size=(30,20))
         self.idText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21), style=wx.TE_PROCESS_ENTER)
         self.idText.SetEditable(True)
-        self.fileLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Name:')
+        self.fileLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Name:', size=(30,20))
         self.fileText = wx.TextCtrl(self.panel, wx.ID_ANY)
         self.fileText.SetEditable(False)
         self.fileText.SetForegroundColour(self.grey)
@@ -83,11 +83,12 @@ class MyFrame(wx.Frame):
         self.extText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21))
         self.extText.SetEditable(False)
         self.extText.SetForegroundColour(self.grey)
-        #self.categoryList = wx.ListBox(choices=[], id=wxID_FRAME1LISTBOX1, name='listBox1', parent=self, pos=wx.Point(8, 48), size=wx.Size(184, 256), style=0)
+        #self.categoryList = wx.ListBox(self.panel, wx.ID_ANY, choices=[], name='category', style=0) #, pos=wx.Point(8, 48), size=wx.Size(184, 256), style=0)
+        self.categoryChoice = wx.Choice( self.panel, wx.ID_ANY, style=0) 
+        self.categoryChoice.Enable(False)
         #id1 = wx.NewId()
         #wx.RegisterId(id1)        
-
-        self.dirLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Dir:')
+        self.dirLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Dir:', size=(30,20))
         self.dirText = wx.TextCtrl(self.panel, wx.ID_ANY)
         self.dirText.SetEditable(False)
         self.dirText.SetForegroundColour(self.grey)
@@ -106,6 +107,7 @@ class MyFrame(wx.Frame):
         self.buttonBoxSizer = wx.StaticBoxSizer(self.buttonBox, wx.HORIZONTAL)
         self.buttonSizer.Add(self.buttonBoxSizer, 1, wx.ALL | wx.EXPAND, 5)
         self.propSizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.nameSizer = wx.BoxSizer(wx.HORIZONTAL)
         self.dirSizer = wx.BoxSizer(wx.HORIZONTAL)
         self.descSizer = wx.StaticBoxSizer(self.descBox, wx.HORIZONTAL)
         self.rootSizer = wx.BoxSizer(wx.VERTICAL)
@@ -125,23 +127,26 @@ class MyFrame(wx.Frame):
 
         self.propSizer.Add(self.idLabel, 0, wx.ALL, 5)
         self.propSizer.Add(self.idText, 0, wx.ALL, 5)
-        self.propSizer.Add(self.fileLabel, 0, wx.ALL, 5)
-        self.propSizer.Add(self.fileText, 1, wx.ALL | wx.EXPAND | wx.RIGHT | wx.LEFT, 5)
         self.propSizer.Add(self.extLabel, 0, wx.ALL, 5)
         self.propSizer.Add(self.extText, 0, wx.ALL, 5)
+        self.propSizer.Add(self.dateLabel, 0, wx.ALL, 5)
+        self.propSizer.Add(self.dateText, 0, wx.ALL, 5)
+        self.propSizer.Add(self.categoryChoice, 1, wx.ALL, 5)
+
+        self.nameSizer.Add(self.fileLabel, 0, wx.ALL, 5)
+        self.nameSizer.Add(self.fileText, 1, wx.ALL | wx.EXPAND, 5)
 
         self.dirSizer.Add(self.dirLabel, 0, wx.ALL, 5)
         self.dirSizer.Add(self.dirText, 1, wx.ALL | wx.EXPAND, 5)
-        self.dirSizer.Add(self.dateLabel, 0, wx.ALL, 5)
-        self.dirSizer.Add(self.dateText, 0, wx.ALL, 5)
 
         self.descSizer.Add(self.descText, 1, wx.ALL | wx.EXPAND | wx.RIGHT, 5)
 
         self.rootSizer.Add(self.searchSizer, 0, wx.ALL | wx.EXPAND, 5)
-        self.rootSizer.Add(self.buttonSizer, 0, wx.ALL | wx.EXPAND, 5)
         self.rootSizer.Add(self.propSizer, 0, wx.ALL | wx.EXPAND, 5)
+        self.rootSizer.Add(self.nameSizer, 0, wx.ALL | wx.EXPAND, 5)
         self.rootSizer.Add(self.dirSizer, 0, wx.ALL | wx.EXPAND, 5)
         self.rootSizer.Add(self.descSizer, 1, wx.EXPAND|wx.TOP|wx.BOTTOM,5)
+        self.rootSizer.Add(self.buttonSizer, 0, wx.ALL | wx.EXPAND, 5)
 
         self.Bind(wx.EVT_BUTTON, self.onSearch, self.searchButton)
         self.Bind(wx.EVT_BUTTON, self.onIndex, self.indexButton)
@@ -161,11 +166,57 @@ class MyFrame(wx.Frame):
 
         self.messageTimer.Start(500)
         self.openDB()
+        self.getCategories()
         self.setMaxid()
         self.searchRecords()
         self.displayRecord(1)
         self.Show()
+        self.getIni()
 
+        print "***Form Init***"
+
+    def openDB(self):
+        # Create DB file if it doesnt exist
+        if not os.path.isfile(self.docdb):
+            print "Creating DB file"
+            try:
+                self.con = sqlite3.connect(self.docdb)
+                self.con.row_factory = sqlite3.Row
+                self.con.text_factory = unicode # Allow unicode conversion
+            except:
+                self.displayMessage("Failed to create Database")
+            self.sql = self.con.cursor()
+            self.sql.execute("""CREATE TABLE docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL,
+            categoriesid INTEGER, seen INTEGER, added TEXT, FOREIGN KEY(categoriesid) REFERENCES categories(id))""")
+            self.sql.execute("""CREATE TABLE dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
+                            docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
+            self.sql.execute("CREATE TABLE categories (id INTEGER PRIMARY KEY, category TEXT, color TEXT, display INTEGER)")
+            for (cat,color, display) in (("Standards", "green", 1), ("Drawings", "blue", 2)):
+                self.sql.execute("INSERT INTO categories (category, color, display) VALUES (?, ?, ?)", (cat, color, display))
+            self.sql.execute("CREATE INDEX hash on docs (hash,size)")
+            self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
+            self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
+            self.sql.execute("CREATE TRIGGER docs_bupdate BEFORE UPDATE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_bdelete BEFORE DELETE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
+            self.sql.execute("CREATE TRIGGER docs_aupdate AFTER UPDATE ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
+            self.sql.execute("CREATE TRIGGER docs_ainsert AFTER INSERT ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
+            self.con.commit()
+        else:
+            # Open DB
+            try:
+                self.con = sqlite3.connect(self.docdb)
+                self.con.row_factory = sqlite3.Row
+                self.con.text_factory = unicode # Allow unicode conversion
+            except:
+                self.displayMessage("Failed to Open Database")
+            self.sql = self.con.cursor()
+            
+    def closeDB(self):
+        if self.con:
+            self.con.commit()
+            self.sql.close()
+            
+    def getIni(self):
         # Create ini file if it doesnt exist
         config = ConfigParser.ConfigParser()
         if not os.path.isfile(self.docini):
@@ -199,49 +250,14 @@ class MyFrame(wx.Frame):
             except:
                 self.displayMessage("Missing ini file")
                 self.onExit(self)
-
-        print "***Form Init***"
-
-    def openDB(self):
-        # Create DB file if it doesnt exist
-        if not os.path.isfile(self.docdb):
-            print "Creating DB file"
-            try:
-                self.con = sqlite3.connect(self.docdb)
-                self.con.row_factory = sqlite3.Row
-                self.con.text_factory = unicode # Allow unicode conversion
-            except:
-                self.displayMessage("Failed to create Database")
-            self.sql = self.con.cursor()
-            self.sql.execute("""CREATE TABLE docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL,
-            categoryid INTEGER, seen INTEGER, added TEXT, FOREIGN KEY(categoryid) REFERENCES categories(id))""")
-            self.sql.execute("""CREATE TABLE dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
-                            docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
-            self.sql.execute("CREATE TABLE categories (id INTEGER PRIMARY KEY, category TEXT, display INTEGER)")
-            for (cat,display) in (("Standards", 1), ("Drawings",2)):
-                self.sql.execute("INSERT INTO categories (category, display) VALUES (?, ?)", (cat,display))
-            self.sql.execute("CREATE INDEX hash on docs (hash,size)")
-            self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
-            self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
-            self.sql.execute("CREATE TRIGGER docs_bupdate BEFORE UPDATE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
-            self.sql.execute("CREATE TRIGGER docs_bdelete BEFORE DELETE ON docs BEGIN DELETE FROM search WHERE docid=old.rowid; END")
-            self.sql.execute("CREATE TRIGGER docs_aupdate AFTER UPDATE ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
-            self.sql.execute("CREATE TRIGGER docs_ainsert AFTER INSERT ON docs BEGIN INSERT INTO search(docid, name, desc) VALUES(new.rowid, new.name, new.desc); END")
-            self.con.commit()
-        else:
-            # Open DB
-            try:
-                self.con = sqlite3.connect(self.docdb)
-                self.con.row_factory = sqlite3.Row
-                self.con.text_factory = unicode # Allow unicode conversion
-            except:
-                self.displayMessage("Failed to Open Database")
-            self.sql = self.con.cursor()
             
-    def closeDB(self):
-        if self.con:
-            self.con.commit()
-            self.sql.close()
+    def getCategories(self):
+        self.categoryChoice.Clear()
+        self.categoryChoice.Append("")
+        categories = self.sql.execute("select category from categories")
+        for category in categories.fetchall():
+            self.categoryChoice.Append(category["category"])
+        self.categoryChoice.SetSelection(0)
 
     def setIndex(self, index):
         (oldindex, results) = self.statusBar.GetStatusText(0).split("/")
@@ -313,6 +329,7 @@ class MyFrame(wx.Frame):
         return(result)
 
     def searchRecords(self, search=""):
+        #self.sql.execute('select docs.id as id, dir, name, ext, desc, date, category, color from docs left join categories on docs.categoriesid=categories.id where docs.id=?', (self.getId(index),))
         if search != "":
             self.results = [element[0] for element in self.sql.execute('select docid from search where search match ?', (search,)).fetchall()]
         else:
@@ -323,9 +340,10 @@ class MyFrame(wx.Frame):
         if self.results:
             if not index:
                 index=1
-            self.sql.execute('select id, dir, name, ext, desc, date from docs where id=?', (self.getId(index),))
+            self.sql.execute('select id, dir, name, ext, desc, date, categoriesid from docs where id=?', (self.getId(index),))
             row = self.sql.fetchone()
             self.setIndex(index)
+            self.categoryChoice.SetSelection(row["categoriesid"] if row["categoriesid"] else 0)
             self.idText.SetValue(str(row["id"]))
             self.fileText.SetValue(row["name"])
             self.extText.SetValue(row["ext"])
@@ -358,19 +376,19 @@ class MyFrame(wx.Frame):
 
     def onOpen(self, e):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())
-        self.messageQueue.put_nowait("Opening file: " + self.fileText.GetValue())
+        self.messageQueue.put_nowait(u"Opening file: " + self.fileText.GetValue())
         os.startfile(filename)
 
     def onCheck(self, e):
         self.disableButtons()
-        self.messageQueue.put_nowait("Started File Check")
+        self.messageQueue.put_nowait(u"Started File Check")
         self.closeDB() # Best to be thread safe
         self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
         self.thread = startThread(self.addFiles, self.docdir)
         self.progress.ShowModal()
         self.openDB()
         
-        self.messageQueue.put_nowait("Check Duplicates")
+        self.messageQueue.put_nowait(u"Check Duplicates")
         dupes = self.sql.execute("select max(id) from dupes").fetchone()[0]
         if dupes:
             if self.displayMessage("Found %s Duplicate Files, Ignore them?" % dupes, status="Query") == wx.ID_YES:
@@ -381,12 +399,12 @@ class MyFrame(wx.Frame):
         if self.workerAbort.isSet():
             self.sql.execute("delete from docs where seen <>1")
         else:
-            self.messageQueue.put_nowait("Checking for Deleted Files")
+            self.messageQueue.put_nowait(u"Checking for Deleted Files")
             missing = self.sql.execute("select count(*) from docs where seen <> 1").fetchone()[0]
             if missing:
                 if self.displayMessage("Found %s missing files\nPurge from database?" % missing, status="Query") == wx.ID_YES:
                         self.sql.execute("delete from docs where seen <>1")
-        self.messageQueue.put_nowait("Updating Results")
+        self.messageQueue.put_nowait(u"Updating Results")
         self.searchRecords() # Would be nice to do this later, but needs the results for below
         if self.addid and self.results:
             self.displayRecord(self.results.index(self.addid.pop(0))+1) # Index of 0 based array
@@ -398,7 +416,7 @@ class MyFrame(wx.Frame):
                 self.enableButtons()
         else:
             self.enableButtons()
-        self.messageQueue.put_nowait("Cleaning up")
+        self.messageQueue.put_nowait(u"Cleaning up")
         self.sql.execute("update docs set seen=''")
         self.con.commit()
         self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
@@ -431,7 +449,7 @@ class MyFrame(wx.Frame):
                 finally:
                     self.sql.execute("delete from dupes where id=?", (dupe["did"],))
             else:
-                self.messageQueue.put_nowait("Ignoring Duplicates")
+                self.messageQueue.put_nowait(u"Ignoring Duplicates")
                 self.sql.execute("delete from dupes")
                 self.con.commit()
                 return
@@ -459,7 +477,7 @@ class MyFrame(wx.Frame):
                 self.workerRun.clear()
                 self.workerAbort.set()
                 self.workerDir.queue.clear()
-                self.messageQueue.put_nowait("Aborted File Check")
+                self.messageQueue.put_nowait(u"Aborted File Check")
             else:
                 threading.Timer(0.2, self.updateProgress).start()
         else:
@@ -508,8 +526,8 @@ class MyFrame(wx.Frame):
                         if filepath != duplicateFile:
                             if not os.path.isfile(duplicateFile):
                                 # File has moved update record
-                                self.messageQueue.put_nowait("File Moved: %s" % filepath)
-                                self.messageQueue.put_nowait("Old Path: %s" % duplicateFile)
+                                self.messageQueue.put_nowait(u"File Moved: %s" % filepath)
+                                self.messageQueue.put_nowait(u"Old Path: %s" % duplicateFile)
                                 try:
                                     self.sql.execute("update docs set dir=?,name=?,ext=? where id=?", (dirpath, filebasename, fileext, duplicate["id"]))
                                 except:
@@ -518,8 +536,8 @@ class MyFrame(wx.Frame):
                                         break
                             else:
                                 # Duplicate File
-                                self.messageQueue.put_nowait("Found Duplicate: %s" % filepath)
-                                self.messageQueue.put_nowait("Clashes with: %s" % duplicateFile)
+                                self.messageQueue.put_nowait(u"Found Duplicate: %s" % filepath)
+                                self.messageQueue.put_nowait(u"Clashes with: %s" % duplicateFile)
                                 try:
                                     self.sql.execute("insert into dupes (dir, name, ext, desc, hash, size, date, seen, added, docsid) values (?, ?, ?, ?, ?, ?, ?, 1, datetime(),?)",
                                                     (dirpath, filebasename, fileext, filebasename, filehash, filesize, filedate, duplicate["id"]))
@@ -551,11 +569,15 @@ class MyFrame(wx.Frame):
         wx.CallAfter(self.progress.Destroy)
 
     def onEdit(self, e):
-        self.disableButtons()
+        if self.editButton.GetLabel() == "Cancel":
+            self.displayRecord(self.getId())
+            self.enableButtons(True)
+        else:
+            self.disableButtons(True)
 
     def onUpdate(self, e):
         #Commit the changes after updating the Desc
-        self.sql.execute("update docs set desc=? where id=?", (self.descText.GetValue(), self.getId()))
+        self.sql.execute("update docs set desc=?, categoriesid=? where id=?", (self.descText.GetValue(), self.categoryChoice.GetSelection(), self.getId()))
         self.con.commit()
         if self.addfiles:
             newid = self.addid.pop(0)
@@ -565,7 +587,7 @@ class MyFrame(wx.Frame):
             else:
                 self.displayRecord(newid)
         else:
-            self.enableButtons()
+            self.enableButtons(True)
             self.addfiles = False
 
     def onExit(self, e):
@@ -584,31 +606,41 @@ class MyFrame(wx.Frame):
             if id in self.results:
                 self.displayRecord(self.results.index(id + 1)) # Allow for 0 indexed array
 
-    def disableButtons(self):
+    def disableButtons(self, cancel=False):
         self.searchButton.Enable(False)
         self.indexButton.Enable(False)
+        self.openButton.Enable(False)
         self.idText.SetEditable(False)
         self.idText.SetForegroundColour(self.grey)
         self.updateButton.Enable(True)
         self.checkButton.Enable(False)
-        self.editButton.Enable(False)
         self.prevButton.Enable(False)
         self.nextButton.Enable(False)
         self.descText.SetForegroundColour(self.black)
         self.descText.SetEditable(True)
+        self.categoryChoice.Enable(True)
+        if cancel:
+            self.editButton.SetLabel("Cancel")
+        else:
+            self.editButton.Enable(False)
 
-    def enableButtons(self):
+    def enableButtons(self, cancel=False):
         self.searchButton.Enable(True)
         self.indexButton.Enable(True)
+        self.openButton.Enable(True)
         self.idText.SetEditable(True)
         self.idText.SetForegroundColour(self.black)
         self.updateButton.Enable(False)
         self.checkButton.Enable(True)
-        self.editButton.Enable(True)
         self.prevButton.Enable(True)
         self.nextButton.Enable(True)
         self.descText.SetForegroundColour(self.grey)
         self.descText.SetEditable(False)
+        self.categoryChoice.Enable(False)
+        if cancel:
+            self.editButton.SetLabel("Edit")
+        else:
+            self.editButton.Enable(True)
 
 
 def startThread(func, *args): # helper method to run a function in another thread
