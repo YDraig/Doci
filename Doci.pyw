@@ -34,6 +34,7 @@ class MyFrame(wx.Frame):
         self.messageQueue = Queue.Queue(maxsize=0)
         self.messageCount = 0
         self.maxidQueue = Queue.Queue(maxsize=1)
+        self.addidQueue = Queue.Queue(maxsize=1)
         self.thread = None
         self.statusBarClear = None
 
@@ -380,12 +381,11 @@ class MyFrame(wx.Frame):
         os.startfile(filename)
 
     def onCheck(self, e):
-        self.disableButtons()
+        self.disableButtons(everything=True)
         self.messageQueue.put_nowait(u"Started File Check")
         self.closeDB() # Best to be thread safe
-        self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
         self.thread = startThread(self.addFiles, self.docdir)
-        self.progress.ShowModal()
+        self.updateProgress()
         self.openDB()
         
         self.messageQueue.put_nowait(u"Check Duplicates")
@@ -456,12 +456,13 @@ class MyFrame(wx.Frame):
         self.con.commit()
 
     def updateProgress(self):
-        if self.workerRun.isSet():
+        self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
+        #No longer Modal so we can run in the main GUI thread :)~
+        self.progress.Show()
+        while self.thread.isAlive():
             try:
                 maxId = self.maxidQueue.get_nowait()
-                wx.MutexGuiEnter()
                 self.setMaxid(maxId)
-                wx.MutexGuiLeave()
                 self.maxidQueue.task_done()
             except Queue.Empty:
                 pass
@@ -474,14 +475,22 @@ class MyFrame(wx.Frame):
             except Queue.Empty:
                 (run, skip) = self.progress.Pulse()
             if run == False:
-                self.workerRun.clear()
-                self.workerAbort.set()
-                self.workerDir.queue.clear()
-                self.messageQueue.put_nowait(u"Aborted File Check")
-            else:
-                threading.Timer(0.2, self.updateProgress).start()
+                if self.workerRun.isSet():
+                    self.workerRun.clear()
+                    self.workerAbort.set()
+                    self.messageQueue.queue.clear()
+                    self.messageQueue.put_nowait(u"Aborted File Check")
+                else:
+                    print "Aborting..."
+            time.sleep(0.2)
         else:
             self.workerDir.queue.clear()
+        try:
+            self.addid = self.addidQueue.get_nowait()
+            self.addidQueue.task_done()
+        except Queue.Empty:
+            pass
+        self.progress.Destroy()
 
     def chunkReader(self, fobj, chunk_size=8192):
         """Generator that reads a file in chunks of bytes"""
@@ -494,7 +503,7 @@ class MyFrame(wx.Frame):
     def addFiles(self, paths, hash=hashlib.sha1):
         self.workerRun.set()
         self.workerAbort.clear()
-        wx.CallAfter(self.updateProgress)
+        addid=[]
         # Open DB (thread safe)
         self.openDB()
         for path in paths:
@@ -554,7 +563,7 @@ class MyFrame(wx.Frame):
                         # New File, add to DB
                         self.sql.execute("insert into docs (dir, name, ext, desc, hash, size, date, seen, added) values (?, ?, ?, ?, ?, ?, ?, 1, datetime())",
                                         (dirpath, filebasename, fileext, filebasename, filehash, filesize, filedate))
-                        self.addid.append(self.sql.lastrowid)
+                        addid.append(self.sql.lastrowid)
                         try:
                             self.maxidQueue.put_nowait(self.sql.lastrowid)
                         except Queue.Full:
@@ -565,15 +574,16 @@ class MyFrame(wx.Frame):
                             break
         self.closeDB()
         self.workerDir.queue.clear()
+        self.messageQueue.queue.clear()
         self.workerRun.clear()
-        wx.CallAfter(self.progress.Destroy)
+        self.addidQueue.put_nowait(addid)
 
     def onEdit(self, e):
         if self.editButton.GetLabel() == "Cancel":
             self.displayRecord(self.getId())
             self.enableButtons(True)
         else:
-            self.disableButtons(True)
+            self.disableButtons(cancel=True)
 
     def onUpdate(self, e):
         #Commit the changes after updating the Desc
@@ -591,13 +601,13 @@ class MyFrame(wx.Frame):
             self.addfiles = False
 
     def onExit(self, e):
-        print "Exiting..."
-        self.closeDB()
         self.Close(True)
-        self.Destroy()
 
     def onClose(self, e):
+        print "Closing..."
+        self.closeDB()
         self.messageTimer.Stop()
+        self.Destroy()
 
     def onId(self, e):
         id = self.idText.GetValue()
@@ -606,25 +616,33 @@ class MyFrame(wx.Frame):
             if id in self.results:
                 self.displayRecord(self.results.index(id + 1)) # Allow for 0 indexed array
 
-    def disableButtons(self, cancel=False):
+    def disableButtons(self, cancel=False, everything=False):
         self.searchButton.Enable(False)
         self.indexButton.Enable(False)
         self.openButton.Enable(False)
         self.idText.SetEditable(False)
         self.idText.SetForegroundColour(self.grey)
-        self.updateButton.Enable(True)
         self.checkButton.Enable(False)
         self.prevButton.Enable(False)
         self.nextButton.Enable(False)
-        self.descText.SetForegroundColour(self.black)
-        self.descText.SetEditable(True)
-        self.categoryChoice.Enable(True)
+        if everything:
+            self.descText.SetForegroundColour(self.grey)
+            self.descText.SetEditable(False)
+            self.updateButton.Enable(False)
+            self.categoryChoice.Enable(False)
+            self.exitButton.Enable(False)
+        else:
+            self.descText.SetForegroundColour(self.black)
+            self.descText.SetEditable(True)
+            self.updateButton.Enable(True)
+            self.categoryChoice.Enable(True)
         if cancel:
             self.editButton.SetLabel("Cancel")
         else:
             self.editButton.Enable(False)
 
     def enableButtons(self, cancel=False):
+        self.exitButton.Enable(True)
         self.searchButton.Enable(True)
         self.indexButton.Enable(True)
         self.openButton.Enable(True)
