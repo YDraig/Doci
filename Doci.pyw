@@ -20,9 +20,11 @@ class MyFrame(wx.Frame):
     def __init__(self, parent, title):
 
         version = "0.0" # Grab real version from exe
-        self.docdb = "Doci.db"
         self.docini = "Doci.ini"
+        self.docdb = ""
+        self.dochtml = ""
         self.docdir = []
+        self.selectlimit = 10000
         self.addfiles = False
         self.addid = []
         self.results = []
@@ -166,13 +168,13 @@ class MyFrame(wx.Frame):
         self.rootSizer.Fit(self)
 
         self.messageTimer.Start(500)
+        self.getIni()
         self.openDB()
         self.getCategories()
         self.setMaxid()
         self.searchRecords()
         self.displayRecord(1)
         self.Show()
-        self.getIni()
 
         print "***Form Init***"
 
@@ -192,8 +194,12 @@ class MyFrame(wx.Frame):
             self.sql.execute("""CREATE TABLE dupes (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL, seen INTEGER, added TEXT,
                             docsid INTEGER, FOREIGN KEY(docsid) REFERENCES docs(id), UNIQUE(dir, name, ext))""")
             self.sql.execute("CREATE TABLE categories (id INTEGER PRIMARY KEY, category TEXT, color TEXT, display INTEGER)")
-            for (cat,color, display) in (("Standards", "green", 1), ("Drawings", "blue", 2)):
+            for (cat,color, display) in (("Standards", "#fff0f0", 1), ("Drawings", "#ecfbd4", 2)):
                 self.sql.execute("INSERT INTO categories (category, color, display) VALUES (?, ?, ?)", (cat, color, display))
+            self.sql.execute("CREATE TABLE colors (id INTEGER PRIMARY KEY, tag TEXT, color TEXT, UNIQUE(tag))")
+            for (tag,color) in (("Header", "#328aa4"), ("Default", "#e5f1f4"), ("Highlight", "#ffffb2")):
+                self.sql.execute("INSERT INTO colors (tag, color) VALUES (?, ?)", (tag, color))
+            self.sql.execute("CREATE INDEX tag on colors (tag)")
             self.sql.execute("CREATE INDEX hash on docs (hash,size)")
             self.sql.execute("CREATE INDEX filename on docs (dir,name,ext)")
             self.sql.execute("CREATE VIRTUAL TABLE search USING fts4(content='docs', name, desc)")
@@ -219,7 +225,17 @@ class MyFrame(wx.Frame):
             
     def getIni(self):
         # Create ini file if it doesnt exist
+        #http://xoomer.virgilio.it/infinity77/main/freeware.html
         config = ConfigParser.ConfigParser()
+        Path = {'Dirs':self.docdir, 'DB':'Doci.db', 'Html':'Doci.html'}
+        Limit = {'Select':'10000'}
+        config.add_section('Path')
+        for option in Path:
+            config.set('Path', option, Path[option])
+        config.add_section('Limit')
+        for option in Limit:
+            config.set('Limit', option, Limit[option])
+
         if not os.path.isfile(self.docini):
             print "Creating ini file"
             currentDir = os.getcwd()
@@ -234,9 +250,7 @@ class MyFrame(wx.Frame):
                 self.displayMessage("Unable to continue without ini file", "Info")
                 self.onExit(self)
                 return
-                
-            config.add_section('Path')
-            config.set('Path', 'Dirs', self.docdir)
+            
             try:
                 with open(self.docini, 'w') as configfile:
                     config.write(configfile)
@@ -247,7 +261,10 @@ class MyFrame(wx.Frame):
         else:
             try:
                 config.readfp(open(self.docini))
-                self.docdir.extend(eval(config.get("Path", "Dirs")))
+                self.docdir.extend(eval(config.get('Path', 'Dirs')))
+                self.docdb = config.get('Path', 'DB', vars=Path)
+                self.dochtml = config.get('Path', 'Html', vars=Path)
+                self.selectlimit = int(config.get('Limit', 'select', vars=Limit))
             except:
                 self.displayMessage("Missing ini file")
                 self.onExit(self)
@@ -255,7 +272,7 @@ class MyFrame(wx.Frame):
     def getCategories(self):
         self.categoryChoice.Clear()
         self.categoryChoice.Append("")
-        categories = self.sql.execute("select category from categories")
+        categories = self.sql.execute("select category from categories order by display")
         for category in categories.fetchall():
             self.categoryChoice.Append(category["category"])
         self.categoryChoice.SetSelection(0)
@@ -303,7 +320,6 @@ class MyFrame(wx.Frame):
             if message != None:
                 self.messageCount = 0
                 if len(message):
-                    print message
                     message = str(queuedepth) + ": " + message
                 self.statusBar.SetStatusText(message,1)
         except:
@@ -373,7 +389,62 @@ class MyFrame(wx.Frame):
         self.displayRecord()
 
     def onIndex(self, e):
-        pass
+        if os.path.exists(self.dochtml):
+            if self.displayMessage("File %s Already Exists!\nOverwite file?" % self.dochtml, "Query") == wx.ID_NO:
+                return
+        try:
+            htmlfile = open(self.dochtml, 'w')
+        except:
+            self.displayMessage("Error Creating html file %s" % self.dochtml)
+        # HTML Headers
+        self.messageQueue.put("Creating Html")
+        htmlfile.write('<html><head><title>Doci</title>')
+        htmlfile.write('<style type="text/css">\n')
+        # Get Table Colors
+        header = self.sql.execute('select color from colors where tag="Header"').fetchone()[0]
+        defaultcolor = self.sql.execute('select color from colors where tag="Default"').fetchone()[0]
+        highlight = self.sql.execute('select color from colors where tag="Highlight"').fetchone()[0]
+        htmlfile.write("""table, td{ font:100% Arial, Helvetica, sans-serif; }
+table{width:100%;border-collapse:collapse;margin:1em 0;}
+th, td{text-align:left;padding:.5em;border:1px solid #fff;}""")
+        htmlfile.write("th, tfoot td{background:%s; color:#fff;}\ntd{background:%s;}" % (header, defaultcolor))
+        
+        # Create Category classes
+        self.sql.execute("select category, color from categories")
+        categories = self.sql.fetchall()
+        for category in categories:
+            htmlfile.write('tr.%s td{background:%s;}' % (category["category"], category["color"]))
+        htmlfile.write('tr:hover>td{background:%s;}' % highlight)
+        htmlfile.write('</style><body>\n')
+            
+        self.sql.execute("select docs.id as id, dir, name, ext, desc, date, size, category, color from docs left join categories on docs.categoriesid=categories.id limit 0,?", (self.selectlimit,))
+        docs = self.sql.fetchall()
+        # Create Table
+        htmlfile.write('<div align=center><h1>Document Indexer</h1></div>\n')
+        htmlfile.write('<table cellspacing="0" cellpadding="0" >\n')
+        htmlfile.write('<thead><th>Id</th><th>File</th><th>Category</th><th>Date</th><th>Size</th></thead>\n')
+        if len(docs) == self.selectlimit:
+            htmlfile.write('<tfoot><tr><td>%s</td><td colspan="4">Max Limit Reached!</td></tr></tfoot>\n' % self.selectlimit)
+        htmlfile.write('<tbody>\n')
+        # Create Table Body
+        for doc in docs:
+            filename = os.path.join(doc["dir"], doc["name"]+doc["ext"])
+            date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(doc["date"]))
+            size = self.sizeof(float(doc["size"]))
+            htmlfile.write('<tr class="%s" ><td>%s</td>' % (doc["category"], doc["id"]))
+            htmlfile.write('<td><a href="%s" title="%s" target="_blank">%s</a></td>' % (filename, filename, doc["desc"]))
+            htmlfile.write('<td>%s</td><td>%s</td><td>%s</td></tr>\n' % (doc["category"], date, size))
+        htmlfile.write("</tbody></table></body></html>\n")
+        htmlfile.close()
+        self.messageQueue.put("Opening Html File")
+        os.startfile(self.dochtml)
+        
+    def sizeof(self, num):
+        for x in ['bytes','KB','MB','GB']:
+            if num < 1024.0:
+                return "%3.1f%s" % (num, x)
+            num /= 1024.0
+        return "%3.1f%s" % (num, 'TB')
 
     def onOpen(self, e):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())

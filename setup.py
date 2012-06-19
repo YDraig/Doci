@@ -1,7 +1,7 @@
 from distutils.core import setup
 import py2exe
 
-exeversion = "0.15"
+exeversion = "0.16"
 setup(
     options = {'py2exe': {'bundle_files': 2, "dll_excludes": ["w9xpopen.exe"]}},
     # windows = [
