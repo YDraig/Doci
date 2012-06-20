@@ -14,6 +14,7 @@ import sqlite3, traceback, hashlib
 import os, sys, wx, time, datetime
 import ConfigParser, threading, Queue
 from win32api import LoadResource
+import wx.lib.agw.multidirdialog as mdd
 import pprint
 
 class MyFrame(wx.Frame):
@@ -24,7 +25,7 @@ class MyFrame(wx.Frame):
         self.docdb = ""
         self.dochtml = ""
         self.docdir = []
-        self.selectlimit = 10000
+        self.selectlimit = 0
         self.addfiles = False
         self.addid = []
         self.results = []
@@ -226,31 +227,28 @@ class MyFrame(wx.Frame):
     def getIni(self):
         # Create ini file if it doesnt exist
         #http://xoomer.virgilio.it/infinity77/main/freeware.html
-        config = ConfigParser.ConfigParser()
-        Path = {'Dirs':self.docdir, 'DB':'Doci.db', 'Html':'Doci.html'}
-        Limit = {'Select':'10000'}
-        config.add_section('Path')
-        for option in Path:
-            config.set('Path', option, Path[option])
-        config.add_section('Limit')
-        for option in Limit:
-            config.set('Limit', option, Limit[option])
+        path = {'dirs':self.docdir, 'db':'Doci.db', 'html':'Doci.html'}
+        limit = {'select':'10000'}
 
         if not os.path.isfile(self.docini):
             print "Creating ini file"
             currentDir = os.getcwd()
-            dlg = wx.DirDialog(self, "Choose documents directory", currentDir,style=wx.DD_DEFAULT_STYLE)
+            dlg = mdd.MultiDirDialog(self, message=u'Choose directory(s) to scan', title=u'Browse For Folders', defaultPath=currentDir, agwStyle=mdd.DD_DIR_MUST_EXIST|mdd.DD_MULTIPLE, name='multidirdialog')
             if dlg.ShowModal() == wx.ID_OK:
-                selectedDir = dlg.GetPath()
-                if currentDir in selectedDir:
-                    self.docdir.append(selectedDir.lstrip(currentDir))
-                else:
-                    self.docdir.append(selectedDir)
+                self.docdir.extend(dlg.GetPaths())
             else:
                 self.displayMessage("Unable to continue without ini file", "Info")
-                self.onExit(self)
+                self.Destroy()
                 return
             
+            config = ConfigParser.ConfigParser()
+            config.add_section('Path')
+            for option in path:
+                config.set('Path', option, path[option])
+            config.add_section('Limit')
+            for option in limit:
+                config.set('Limit', option, limit[option])
+                
             try:
                 with open(self.docini, 'w') as configfile:
                     config.write(configfile)
@@ -258,16 +256,18 @@ class MyFrame(wx.Frame):
             except:
                 self.displayMessage("Error Creating ini file")
                 self.onExit(self)
-        else:
-            try:
-                config.readfp(open(self.docini))
-                self.docdir.extend(eval(config.get('Path', 'Dirs')))
-                self.docdb = config.get('Path', 'DB', vars=Path)
-                self.dochtml = config.get('Path', 'Html', vars=Path)
-                self.selectlimit = int(config.get('Limit', 'select', vars=Limit))
-            except:
-                self.displayMessage("Missing ini file")
-                self.onExit(self)
+                
+        defaults = dict(path.items() + limit.items())
+        config = ConfigParser.SafeConfigParser(defaults)
+        try:
+            config.readfp(open(self.docini))
+            self.docdir.extend(eval(config.get('Path', 'dirs')))
+            self.docdb = config.get('Path', 'db')
+            self.dochtml = config.get('Path', 'html')
+            self.selectlimit = int(config.get('Limit', 'select'))
+        except:
+            self.displayMessage("Missing ini file")
+            self.onExit(self)
             
     def getCategories(self):
         self.categoryChoice.Clear()
