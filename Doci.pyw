@@ -20,11 +20,11 @@ import pprint
 class MyFrame(wx.Frame):
     def __init__(self, parent, title):
 
-        version = "0.0" # Grab real version from exe
+        self.version = "0.0" # Grab real version from exe
         self.docini = "Doci.ini"
         self.docdb = ""
         self.dochtml = ""
-        self.docdir = []
+        self.docdir = [unicode(os.getcwd())]
         self.selectlimit = 0
         self.addfiles = False
         self.addid = []
@@ -44,11 +44,11 @@ class MyFrame(wx.Frame):
         # Get the Icon and Version string from the exe resources
         if os.path.splitext(sys.argv[0])[1] == ".exe":
             icon = wx.Icon(sys.argv[0], wx.BITMAP_TYPE_ICO)
-            version = LoadResource(0, u'VERSION', 1)
+            self.version = LoadResource(0, u'VERSION', 1)
         else:
             icon = wx.Icon("Doci.ico", wx.BITMAP_TYPE_ICO)
             
-        wx.Frame.__init__(self, parent, title=title + " - v" + version)
+        wx.Frame.__init__(self, parent, title=title + " - v" + self.version)
         self.SetIcon(icon)
         wx.EVT_CLOSE(self, self.onClose)
 
@@ -57,15 +57,32 @@ class MyFrame(wx.Frame):
         
         self.statusBar = self.CreateStatusBar()
         self.statusBar.SetFieldsCount(3)
-        self.statusBar.SetStatusWidths([85,-1,60,])
-        self.statusBar.SetStatusText("0/0", 0)
+        self.statusBar.SetStatusWidths([-1,85,60])
+        self.statusBar.SetStatusText("0/0", 1) # Initalise the index/records field
         self.messageTimer = wx.Timer(self)
 
+        self.menuBar = wx.MenuBar()
+        self.fileMenu = wx.Menu()
+        self.menuBar.Append(self.fileMenu, "&File")
+        self.fileOpen = self.fileMenu.Append(wx.ID_OPEN, '&Open', 'Open current file')
+        self.fileIndex = self.fileMenu.Append(wx.ID_INDEX, '&Index', 'Create HTML Index')
+        self.fileMenu.AppendSeparator()
+        self.fileExit = wx.MenuItem(self.fileMenu, wx.ID_EXIT, '&Exit\tCtrl+Q')
+        self.fileMenu.AppendItem(self.fileExit)
+        self.editMenu = wx.Menu()
+        self.menuBar.Append(self.editMenu, "&Edit")
+        self.editDirectories = self.editMenu.Append(wx.ID_ADD, '&Directories', 'Directories to scan')
+        self.editCategories = self.editMenu.Append(wx.ID_EDIT, '&Categories', 'Categories and colors')
+        self.helpMenu = wx.Menu()
+        self.menuBar.Append(self.helpMenu, "&Help")
+        self.helpAbout = self.helpMenu.Append(wx.ID_ABOUT, '&About')
+
+        self.SetMenuBar(self.menuBar)
+        
         self.searchLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Find:')
         self.searchText = wx.TextCtrl(self.panel, wx.ID_ANY, style=wx.TE_PROCESS_ENTER)
         self.searchButton = wx.Button(self.panel, wx.ID_ANY, 'Search')
         self.indexButton = wx.Button(self.panel, wx.ID_ANY, 'Index')
-        self.openButton = wx.Button(self.panel, wx.ID_ANY, 'Open')
 
         self.buttonBox = wx.StaticBox(self.panel, wx.ID_ANY, 'Controls')
         self.checkButton = wx.Button(self.panel, wx.ID_ANY, 'Check')
@@ -74,7 +91,7 @@ class MyFrame(wx.Frame):
         self.updateButton.Enable(False)
         self.prevButton = wx.Button(self.panel, wx.ID_ANY, 'Prev')
         self.nextButton = wx.Button(self.panel, wx.ID_ANY, 'Next')
-        self.exitButton = wx.Button(self.panel, wx.ID_EXIT, 'Exit')
+        self.openButton = wx.Button(self.panel, wx.ID_ANY, 'Open')
 
         self.idLabel = wx.StaticText(self.panel, wx.ID_ANY, 'Id:', size=(30,20))
         self.idText = wx.TextCtrl(self.panel, wx.ID_ANY, size=(50,21), style=wx.TE_PROCESS_ENTER)
@@ -120,14 +137,13 @@ class MyFrame(wx.Frame):
         self.searchSizer.Add(self.searchText, 1, wx.ALL | wx.EXPAND, 5)
         self.searchSizer.Add(self.searchButton, 0, wx.ALL, 5)
         self.searchSizer.Add(self.indexButton, 0, wx.ALL, 5)
-        self.searchSizer.Add(self.openButton, 0, wx.ALL, 5)
 
         self.buttonBoxSizer.Add(self.checkButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.editButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.updateButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.prevButton, 0, wx.ALL, 5)
         self.buttonBoxSizer.Add(self.nextButton, 0, wx.ALL, 5)
-        self.buttonBoxSizer.Add(self.exitButton, 0, wx.ALL, 5)
+        self.buttonBoxSizer.Add(self.openButton, 0, wx.ALL, 5)
 
         self.propSizer.Add(self.idLabel, 0, wx.ALL, 5)
         self.propSizer.Add(self.idText, 0, wx.ALL, 5)
@@ -160,10 +176,15 @@ class MyFrame(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.onUpdate, self.updateButton)
         self.Bind(wx.EVT_BUTTON, self.onPrev, self.prevButton)
         self.Bind(wx.EVT_BUTTON, self.onNext, self.nextButton)
-        self.Bind(wx.EVT_BUTTON, self.onExit, self.exitButton)
         self.Bind(wx.EVT_TEXT_ENTER, self.onSearch, self.searchText)
         self.Bind(wx.EVT_TEXT_ENTER, self.onId, self.idText)
         self.Bind(wx.EVT_TIMER, self.setMessage, self.messageTimer)
+        self.Bind(wx.EVT_MENU, self.onOpen, self.fileOpen)
+        self.Bind(wx.EVT_MENU, self.onIndex, self.fileIndex)
+        self.Bind(wx.EVT_MENU, self.onChangeDir, self.editDirectories)
+        self.Bind(wx.EVT_MENU, self.onEditCategories, self.editCategories)
+        self.Bind(wx.EVT_MENU, self.onExit, self.fileExit)
+        self.Bind(wx.EVT_MENU, self.onAbout, self.helpAbout)
 
         self.panel.SetSizer(self.rootSizer)
         self.rootSizer.Fit(self)
@@ -226,13 +247,13 @@ class MyFrame(wx.Frame):
             
     def getIni(self):
         # Create ini file if it doesnt exist
-        #http://xoomer.virgilio.it/infinity77/main/freeware.html
         path = {'dirs':self.docdir, 'db':'Doci.db', 'html':'Doci.html'}
         limit = {'select':'10000'}
 
         if not os.path.isfile(self.docini):
             print "Creating ini file"
             currentDir = os.getcwd()
+            #http://xoomer.virgilio.it/infinity77/main/freeware.html
             dlg = mdd.MultiDirDialog(self, message=u'Choose directory(s) to scan', title=u'Browse For Folders', defaultPath=currentDir, agwStyle=mdd.DD_DIR_MUST_EXIST|mdd.DD_MULTIPLE, name='multidirdialog')
             if dlg.ShowModal() == wx.ID_OK:
                 self.docdir.extend(dlg.GetPaths())
@@ -241,34 +262,53 @@ class MyFrame(wx.Frame):
                 self.Destroy()
                 return
             
-            config = ConfigParser.ConfigParser()
-            config.add_section('Path')
+            self.config = ConfigParser.SafeConfigParser()
+            self.config.add_section('Path')
             for option in path:
-                config.set('Path', option, path[option])
-            config.add_section('Limit')
+                self.config.set('Path', option, str(path[option]))
+            self.config.add_section('Limit')
             for option in limit:
-                config.set('Limit', option, limit[option])
+                self.config.set('Limit', option, str(limit[option]))
                 
             try:
                 with open(self.docini, 'w') as configfile:
-                    config.write(configfile)
+                    self.config.write(configfile)
                 configfile.close()
             except:
                 self.displayMessage("Error Creating ini file")
                 self.onExit(self)
                 
         defaults = dict(path.items() + limit.items())
-        config = ConfigParser.SafeConfigParser(defaults)
+        self.config = ConfigParser.SafeConfigParser(defaults)
         try:
-            config.readfp(open(self.docini))
-            self.docdir.extend(eval(config.get('Path', 'dirs')))
-            self.docdb = config.get('Path', 'db')
-            self.dochtml = config.get('Path', 'html')
-            self.selectlimit = int(config.get('Limit', 'select'))
+            self.config.readfp(open(self.docini))
+            self.docdir.extend(eval(self.config.get('Path', 'dirs')))
+            self.docdb = self.config.get('Path', 'db')
+            self.dochtml = self.config.get('Path', 'html')
+            self.selectlimit = int(self.config.get('Limit', 'select'))
         except:
             self.displayMessage("Missing ini file")
             self.onExit(self)
             
+    def onChangeDir(self, e):
+        addorreplace = self.displayMessage("Add to exiting Directory list?", status="Query")
+        currentDir = os.getcwd()
+        dlg = mdd.MultiDirDialog(self, message=u'Choose directory(s) to scan', title=u'Browse For Folders', defaultPath=currentDir, agwStyle=mdd.DD_DIR_MUST_EXIST|mdd.DD_MULTIPLE, name='multidirdialog')
+        if dlg.ShowModal() == wx.ID_OK:
+            if addorreplace == wx.ID_NO:
+                self.docdir = []
+            self.docdir.extend(dlg.GetPaths())
+            self.config.set('Path', 'Dirs', str(self.docdir))
+            try:
+                with open(self.docini, 'w') as configfile:
+                    self.config.write(configfile)
+                configfile.close()
+            except:
+                self.displayMessage("Error Saving ini file")
+        else:
+            return
+        
+    
     def getCategories(self):
         self.categoryChoice.Clear()
         self.categoryChoice.Append("")
@@ -278,12 +318,12 @@ class MyFrame(wx.Frame):
         self.categoryChoice.SetSelection(0)
 
     def setIndex(self, index):
-        (oldindex, results) = self.statusBar.GetStatusText(0).split("/")
-        self.statusBar.SetStatusText(str(index) + "/" + str(results),0)
+        (oldindex, results) = self.statusBar.GetStatusText(1).split("/")
+        self.statusBar.SetStatusText(str(index) + "/" + str(results),1)
 
     def getIndex(self):
-        if self.statusBar.GetStatusText(0) != 'None':
-            (index, results) = self.statusBar.GetStatusText(0).split("/")
+        if self.statusBar.GetStatusText(1) != 'None':
+            (index, results) = self.statusBar.GetStatusText(1).split("/")
             return int(index)
         
     def getId(self, index=None):
@@ -293,12 +333,12 @@ class MyFrame(wx.Frame):
             return self.results[index - 1]
 
     def setResults(self, results):
-        (index, oldresults) = self.statusBar.GetStatusText(0).split("/")
-        self.statusBar.SetStatusText(str(index) + "/" + str(results),0)
+        (index, oldresults) = self.statusBar.GetStatusText(1).split("/")
+        self.statusBar.SetStatusText(str(index) + "/" + str(results),1)
 
     def getResults(self):
         if self.statusBar.GetStatusText(1) != 'None':
-            (index, results) = self.statusBar.GetStatusText(0).split("/")
+            (index, results) = self.statusBar.GetStatusText(1).split("/")
             return int(results)
 
     def setMaxid(self, maxid=""):
@@ -321,7 +361,7 @@ class MyFrame(wx.Frame):
                 self.messageCount = 0
                 if len(message):
                     message = str(queuedepth) + ": " + message
-                self.statusBar.SetStatusText(message,1)
+                self.statusBar.SetStatusText(message,0)
         except:
             self.displayMessage("Failure on messagebar")
 
@@ -730,7 +770,12 @@ th, td{text-align:left;padding:.5em;border:1px solid #fff;}""")
             self.editButton.SetLabel("Edit")
         else:
             self.editButton.Enable(True)
+            
+    def onAbout(self, e):
+        self.displayMessage("       Doci - v%s\nDocument indexer\n\n             by\n     Brinley Craig\n       Phill Slater" % str(self.version), "Info")
 
+    def onEditCategories(self, e):
+        pass
 
 def startThread(func, *args): # helper method to run a function in another thread
     thread = threading.Thread(target=func, args=args)
