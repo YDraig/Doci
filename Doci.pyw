@@ -531,7 +531,7 @@ class DisplayForm(wx.Frame):
                 htmlfile.write(u'<td><a href="%s" title="%s" target="_blank">%s</a></td>' % (filename, filename, doc["desc"]))
             except:
                 self.messageQueue.put("Error converting: %s" % repr(filename))
-            htmlfile.write(u'<td>%s</td><td>%s</td><td>%s</td></tr>\n' % (doc["category"], date, size))
+            htmlfile.write(u'<td nowrap="nowrap">%s</td><td nowrap="nowrap">%s</td><td nowrap="nowrap">%s</td></tr>\n' % (doc["category"], date, size))
         htmlfile.write(u"</tbody></table></body></html>\n")
         htmlfile.close()
         self.messageQueue.put("Opening Html File")
@@ -540,9 +540,9 @@ class DisplayForm(wx.Frame):
     def sizeof(self, num):
         for x in ['bytes','KB','MB','GB']:
             if num < 1024.0:
-                return "%3.1f%s" % (num, x)
+                return "%3.1f %s" % (num, x)
             num /= 1024.0
-        return "%3.1f%s" % (num, 'TB')
+        return "%3.1f %s" % (num, 'TB')
 
     def onOpen(self, event):
         filename = os.path.join(self.dirText.GetValue(), self.fileText.GetValue() + self.extText.GetValue())
@@ -554,7 +554,8 @@ class DisplayForm(wx.Frame):
         self.messageQueue.put_nowait(u"Started File Check")
         self.closeDB() # Best to be thread safe
         self.thread = startThread(self.addFiles, self.docdir)
-        self.updateProgress()
+        progress = DisplayProgress(self)
+        progress.ShowModal()
         self.openDB()
 
         self.messageQueue.put_nowait(u"Check Duplicates")
@@ -621,43 +622,6 @@ class DisplayForm(wx.Frame):
                 self.con.commit()
                 return
         self.con.commit()
-
-    def updateProgress(self):
-        self.progress = wx.ProgressDialog('Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME)
-        #No longer Modal so we can run in the main GUI thread :)~
-        self.progress.Show()
-        while self.thread.isAlive():
-            try:
-                maxId = self.maxidQueue.get_nowait()
-                self.setMaxid(maxId)
-                self.maxidQueue.task_done()
-            except Queue.Empty:
-                pass
-            try:
-                currentDir = self.workerDir.get_nowait()
-                if len(currentDir) > 30:
-                    currentDir = currentDir[:10] + "..." + currentDir[-20:]
-                (run, skip) = self.progress.Pulse(currentDir)
-                self.workerDir.task_done()
-            except Queue.Empty:
-                (run, skip) = self.progress.Pulse()
-            if run == False:
-                if self.workerRun.isSet():
-                    self.workerRun.clear()
-                    self.workerAbort.set()
-                    self.messageQueue.queue.clear()
-                    self.messageQueue.put_nowait(u"Aborted File Check")
-                else:
-                    print "Aborting..."
-            time.sleep(0.2)
-        else:
-            self.workerDir.queue.clear()
-        try:
-            self.addid = self.addidQueue.get_nowait()
-            self.addidQueue.task_done()
-        except Queue.Empty:
-            pass
-        self.progress.Destroy()
 
     def chunkReader(self, fobj, chunk_size=8192):
         """Generator that reads a file in chunks of bytes"""
@@ -842,6 +806,44 @@ class DisplayForm(wx.Frame):
     def onEditSettings(self, event):
         changeLimits = EditSettings(self)
         changeLimits.ShowModal()
+
+class DisplayProgress(wx.ProgressDialog):
+    def __init__(self, parent):
+        wx.ProgressDialog.__init__(self, 'Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME|wx.PD_APP_MODAL)
+
+        while parent.thread.isAlive():
+            try:
+                maxId = parent.maxidQueue.get_nowait()
+                parent.setMaxid(maxId)
+                parent.maxidQueue.task_done()
+            except Queue.Empty:
+                pass
+            try:
+                currentDir = parent.workerDir.get_nowait()
+                if len(currentDir) > 30:
+                    currentDir = currentDir[:10] + "..." + currentDir[-20:]
+                (run, skip) = self.Pulse(currentDir)
+                parent.workerDir.task_done()
+            except Queue.Empty:
+                (run, skip) = self.Pulse()
+            if run == False:
+                if parent.workerRun.isSet():
+                    parent.workerRun.clear()
+                    parent.workerAbort.set()
+                    parent.messageQueue.queue.clear()
+                    parent.messageQueue.put_nowait(u"Aborted File Check")
+                else:
+                    print "Aborting..."
+            time.sleep(0.2)
+        else:
+            parent.workerDir.queue.clear()
+        try:
+            parent.addid = parent.addidQueue.get_nowait()
+            parent.addidQueue.task_done()
+        except Queue.Empty:
+            pass
+        
+        self.Destroy()
 
 class EditCategories(wx.Dialog):
     def __init__(self, parent):
