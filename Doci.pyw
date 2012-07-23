@@ -344,8 +344,10 @@ class DisplayForm(wx.Frame):
             try:
                 with open(self.docini, 'w') as configfile:
                     self.config.write(configfile)
+                self.onScan(self)
             except:
                 self.displayMessage("Error Saving ini file")
+                print "Closed?", configfile.closed
         else:
             return
 
@@ -836,12 +838,10 @@ class DisplayForm(wx.Frame):
     def onEditCategories(self, event):
         changeCategories = EditCategories(self)
         changeCategories.ShowModal()
-        changeCategories.Destroy()
 
     def onEditSettings(self, event):
         changeLimits = EditSettings(self)
         changeLimits.ShowModal()
-        changeLimits.Destroy()
 
 class EditCategories(wx.Dialog):
     def __init__(self, parent):
