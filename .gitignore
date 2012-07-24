@@ -1,0 +1,13 @@
+.idea/*
+build/*
+dist/*
+.dropbox
+msvc*.dll
+Microsoft*
+*.wpr
+*.wpu
+*.ini
+*.html
+*.db
+*.exe
+database.bat
