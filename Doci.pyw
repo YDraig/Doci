@@ -10,7 +10,7 @@
 # Copyright:   (c) Brinley Craig 2012
 # Licence:     GPL V2
 #-------------------------------------------------------------------------------
-import sqlite3, traceback, hashlib
+import sqlite3, traceback, hashlib, logging
 import os, sys, wx, time, datetime, random
 import locale, codecs, subprocess
 import ConfigParser, threading, Queue
@@ -28,7 +28,6 @@ class DisplayForm(wx.Frame):
         self.docdir = [os.getcwdu()]
         self.selectlimit = 0
         self.encoding = locale.getdefaultlocale()[1]
-        self.addfiles = False
         self.addid = []
         self.results = []
         self.grey = wx.NamedColour("GREY")
@@ -79,12 +78,13 @@ class DisplayForm(wx.Frame):
         self.fileMenu.AppendSeparator()
         self.fileScan = self.fileMenu.Append(wx.ID_FIND, '&Scan', 'Scan Directories')
         self.fileMenu.AppendSeparator()
-        self.fileExit = wx.MenuItem(self.fileMenu, wx.ID_EXIT, '&Exit\tCtrl+Q')
-        self.fileMenu.AppendItem(self.fileExit)
+        self.fileExit = self.fileMenu.Append(wx.ID_EXIT, '&Exit\tCtrl+Q')
         self.editMenu = wx.Menu()
         self.menuBar.Append(self.editMenu, "&Edit")
         self.editDirectories = self.editMenu.Append(wx.ID_ADD, '&Directories', 'Directories to scan')
         self.editCategories = self.editMenu.Append(wx.ID_EDIT, '&Categories', 'Categories and colors')
+        self.editMenu.AppendSeparator()
+        self.editDatabase = self.editMenu.Append(wx.ID_NEW, 'Data&base', 'Select Database')
         self.editSettings = self.editMenu.Append(wx.ID_SETUP, '&Settings', 'Edit Settings')
         self.helpMenu = wx.Menu()
         self.menuBar.Append(self.helpMenu, "&Help")
@@ -196,6 +196,7 @@ class DisplayForm(wx.Frame):
         self.Bind(wx.EVT_MENU, self.onScan, self.fileScan)
         self.Bind(wx.EVT_MENU, self.onChangeDir, self.editDirectories)
         self.Bind(wx.EVT_MENU, self.onEditCategories, self.editCategories)
+        self.Bind(wx.EVT_MENU, self.onEditDatabase, self.editDatabase)
         self.Bind(wx.EVT_MENU, self.onEditSettings, self.editSettings)
         self.Bind(wx.EVT_MENU, self.onExit, self.fileExit)
         self.Bind(wx.EVT_MENU, self.onDebug, self.helpDebug)
@@ -213,18 +214,20 @@ class DisplayForm(wx.Frame):
         self.displayRecord(1)
         self.Show()
 
-        print "***Form Init*** (%s)" % self.encoding
+        logging.debug("***Form Init*** (%s)", self.encoding)
 
     def openDB(self):
         # Create DB file if it doesnt exist
+        self.editDatabase.SetHelp("Select Database (%s)" % self.docdb)
         if not os.path.isfile(self.docdb):
-            print "Creating DB file"
+            logging.info("Creating DB file: %s", self.docdb)
             try:
                 self.con = sqlite3.connect(self.docdb)
                 self.con.row_factory = sqlite3.Row
                 self.con.text_factory = unicode # Allow unicode conversion
             except:
                 self.displayMessage("Failed to create Database")
+                quit()
             self.sql = self.con.cursor()
             self.sql.execute("""CREATE TABLE docs (id INTEGER PRIMARY KEY, dir TEXT, name TEXT, ext TEXT, desc TEXT, hash TEXT, size TEXT, date REAL,
                             categoriesid INTEGER, seen INTEGER, added TEXT, FOREIGN KEY(categoriesid) REFERENCES categories(id))""")
@@ -253,6 +256,7 @@ class DisplayForm(wx.Frame):
             self.con.commit()
         else:
             # Open DB
+            logging.info("Opening DB %s", self.docdb)
             try:
                 self.con = sqlite3.connect(self.docdb)
                 self.con.row_factory = sqlite3.Row
@@ -271,6 +275,7 @@ class DisplayForm(wx.Frame):
 
     def closeDB(self):
         if isinstance(self.con, sqlite3.Connection):
+            logging.info("Commit & Close DB %s", self.docdb)
             self.con.commit()
             self.sql.close()
 
@@ -278,16 +283,16 @@ class DisplayForm(wx.Frame):
         # Create ini file if it doesnt exist
         path = {'dirs':self.docdir, 'db':'Doci.db', 'html':'Doci.html'}
         settings = {'select':'30000'}
+        currentdir = os.getcwdu()
 
         if not os.path.isfile(self.docini):
-            print "Creating ini file"
-            currentdir = os.getcwdu()
+            logging.debug("Creating ini file")
             #http://xoomer.virgilio.it/infinity77/main/freeware.html
             dlg = MDD.MultiDirDialog(self, message=u'Choose directory(s) to scan', title=u'Browse For Folders', defaultPath=currentdir, agwStyle=MDD.DD_DIR_MUST_EXIST|MDD.DD_MULTIPLE, name='multidirdialog')
             if dlg.ShowModal() == wx.ID_OK:
                 self.docdir = dlg.GetPaths()
                 path['dirs'] = self.docdir
-                print self.docdir
+                logging.info(self.docdir)
             else:
                 self.displayMessage("Unable to continue without ini file", "Info")
                 self.Destroy()
@@ -301,30 +306,86 @@ class DisplayForm(wx.Frame):
             self.config.add_section('settings')
             for option in settings:
                 self.config.set('settings', option, str(settings[option]))
+            self.saveIni()
 
-            try:
-                with open(self.docini, 'w') as configfile:
-                    self.config.write(configfile)
-            except:
-                self.displayMessage("Error Creating ini file")
-                self.onExit(self)
-
-        #defaults = dict(path.items() + limit.items())
-        #self.config = ConfigParser.SafeConfigParser(defaults)
         self.config = ConfigParser.SafeConfigParser()
         try:
             self.config.read(self.docini)
-            self.docdir = eval(self.config.get('path', 'dirs'))
             self.docdb = self.config.get('path', 'db')
+            self.docdir = eval(self.config.get('path', 'dirs'))
             self.dochtml = self.config.get('path', 'html')
+            if self.docdb != 'Doci.db':
+                try:
+                    self.docdir = eval(self.config.get(self.docdb, 'dirs'))
+                    self.dochtml = self.config.get(self.docdb, 'html')
+                    logging.debug("Loaded DB specific settings: %s", self.docdb)
+                except ConfigParser.NoOptionError:
+                    logging.warn("No Settings found, using defaults: %s", self.docdb)
+                    self.config.set(self.docdb, 'db', str(self.docdir))
+                    self.saveIni()
+                except ConfigParser.NoSectionError:
+                    self.config.set('path', 'db', path["db"])
+                    self.docdb = 'Doci.db'
+                    self.saveIni()
+                    self.displayMessage("Corrupt INI file\nSetting DB to default %s" % path["db"],status="Info")
+                    os.chdir(currentdir)
             self.selectlimit = int(self.config.get('settings', 'select'))
             try:
                 self.encoding = self.config.get('settings', 'encoding')
             except ConfigParser.NoOptionError:
-                pass
+                logging.debug("No Encoding setting found")
         except:
             self.displayMessage("Missing ini file")
             self.onExit(self)
+        else:
+            self.editDirectories.SetHelp('Directories to scan %s' % str(self.docdir))
+
+    def saveIni(self):
+        try:
+            with open(self.docini, 'w') as configfile:
+                self.config.write(configfile)
+        except:
+            self.displayMessage("Error Saving ini file")
+            logging.debug("Closed? %s", str(configfile.closed))   
+        else:
+            logging.info("Saved INI file.")
+            
+    def onEditDatabase(self, event):
+        currentdir = os.getcwdu()
+        olddir, oldfile = os.path.split(self.docdb)
+        if not olddir:
+            olddir = currentdir
+        dlg = wx.FileDialog(self, message=u'Select Database', defaultDir=olddir, defaultFile=oldfile, wildcard='DB files (*.db)|*.db|SQLite 3 (*.sqlite3)|*.sqlite3|SQLite 3 (*.db3)|*.db3', style=wx.FD_OPEN)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.closeDB()
+            newdb = dlg.GetPath()
+            #Strip path if its in Current Dir
+            dbpath, dbfile = os.path.split(newdb)
+            if dbpath == currentdir:
+                self.docdb = dbfile
+            else:
+                self.docdb = newdb
+            logging.debug("Selected DB: %s", self.docdb)
+            os.chdir(currentdir)
+            self.config.set('path', 'db', str(self.docdb))
+            self.saveIni()
+            self.openDB()
+            self.getCategories()
+            self.setMaxid()
+            self.searchRecords()
+            self.displayRecord(1)            
+            if self.config.has_section(self.docdb):
+                self.getIni()
+            else:
+                if self.docdb != "Doci.db":
+                    filename, fileext = os.path.splitext(dlg.GetFilename())
+                    self.config.add_section(self.docdb)
+                    self.config.set(self.docdb, 'dirs', str(self.docdir))
+                    self.config.set(self.docdb, 'html', str(filename + ".html"))
+                    self.saveIni()
+                    self.onChangeDir(None)
+        else:
+            return
 
     def onChangeDir(self, event):
         currentdir = os.getcwdu()
@@ -338,16 +399,15 @@ class DisplayForm(wx.Frame):
             if addorreplace == wx.ID_NO:
                 self.docdir = []
             self.docdir.extend(dlg.GetPaths())
-            print self.docdir
+            logging.info(self.docdir)
             os.chdir(currentdir)
-            self.config.set('path', 'dirs', str(self.docdir))
-            try:
-                with open(self.docini, 'w') as configfile:
-                    self.config.write(configfile)
-                self.onScan(self)
-            except:
-                self.displayMessage("Error Saving ini file")
-                print "Closed?", configfile.closed
+            if self.config.has_section(self.docdb):
+                self.config.set(self.docdb, 'dirs', str(self.docdir)) 
+            else:
+                self.config.set('path', 'dirs', str(self.docdir))
+            self.saveIni()
+            self.editDirectories.SetHelp('Directories to scan %s' % str(self.docdir))
+            self.onScan(self)
         else:
             return
 
@@ -416,13 +476,13 @@ class DisplayForm(wx.Frame):
             dlg = wx.MessageDialog(self, message=message, caption='Delete Duplicate File?', style=wx.YES_NO|wx.CANCEL|wx.ICON_EXCLAMATION)
         elif status == "Warning":
             self.messageQueue.put_nowait(message)
-            print "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message
+            logging.warning("Line: %d - %s", sys.exc_info()[2].tb_lineno, message)
             return
         else:
+            logging.exception(message)
             self.messageQueue.put_nowait(message)
-            dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + " - " + message + "\n\n" + traceback.format_exc(0)
-            print dlgMessage
-            dlg = wx.MessageDialog(self, message=dlgMessage, caption='Error', style=wx.OK|wx.CANCEL|wx.ICON_ERROR)
+            dlgMessage = "Line: " + str(sys.exc_info()[2].tb_lineno) + "\n" + traceback.format_exc(0)
+            dlg = wx.MessageDialog(self, message=dlgMessage, caption=message, style=wx.OK|wx.CANCEL|wx.ICON_ERROR)
         result = dlg.ShowModal()
         dlg.Destroy()
         return(result)
@@ -432,7 +492,7 @@ class DisplayForm(wx.Frame):
         if search != "":
             self.results = [element[0] for element in self.sql.execute('select docid from search where search match ?', (search,)).fetchall()]
         else:
-            self.results = [element[0] for element in self.sql.execute('select id from docs').fetchall()]
+            self.results = [element[0] for element in self.sql.execute('select id from docs order by id').fetchall()]
         self.setResults(len(self.results))
 
     def displayRecord(self, index=None):
@@ -550,14 +610,13 @@ class DisplayForm(wx.Frame):
         startfile(filename)
 
     def onScan(self, event):
-        self.disableButtons(everything=True)
         self.messageQueue.put_nowait(u"Started File Check")
         self.closeDB() # Best to be thread safe
         self.thread = startThread(self.addFiles, self.docdir)
         progress = DisplayProgress(self)
         progress.ShowModal()
-        self.openDB()
-
+        self.openDB()
+        addfiles = False
         self.messageQueue.put_nowait(u"Check Duplicates")
         dupes = self.sql.execute("select max(id) from dupes").fetchone()[0]
         if dupes:
@@ -576,18 +635,16 @@ class DisplayForm(wx.Frame):
         self.searchRecords() # Would be nice to do this later, but needs the results for below
         if self.addid and self.results:
             self.displayRecord(self.results.index(self.addid.pop(0))+1) # Index of 0 based array
-            if self.displayMessage("Found %s new files\nBulk update files?" % (len(self.addid) + 1), status="Query") == wx.ID_YES:
-                self.addfiles = True
+            if self.displayMessage("Found %s new files\nBulk update files?" % (len(self.addid)), status="Query") == wx.ID_YES:
+                addfiles = True
             else:
-                self.addfiles = False
                 self.addid = []
-                self.enableButtons()
-        else:
-            self.enableButtons()
         self.messageQueue.put_nowait(u"Cleaning up")
         self.sql.execute("update docs set seen=''")
         self.con.commit()
         self.sql.execute("INSERT INTO search(search) VALUES('optimize')")
+        if addfiles:
+            self.onEdit(None)
 
     def removeFiles(self):
         self.sql.execute("""select dupes.id did, dupes.dir ddir, dupes.name dname, dupes.ext dext, dupes.docsid oid, docs.dir odir, docs.name oname, docs.ext oext
@@ -635,6 +692,7 @@ class DisplayForm(wx.Frame):
         self.workerRun.set()
         self.workerAbort.clear()
         addid=[]
+        addFilesLog = logging.getLogger("addFiles")
         # Open DB (thread safe)
         self.openDB()
         for path in paths:
@@ -645,6 +703,7 @@ class DisplayForm(wx.Frame):
                 continue
             for dirpath, dirnames, filenames in os.walk(path):
                 self.workerDir.put_nowait(dirpath)
+                addFilesLog.debug(dirpath)
                 if not self.workerRun.isSet():
                     break
                 for file in filenames:
@@ -703,15 +762,20 @@ class DisplayForm(wx.Frame):
                         if self.displayMessage("Failed to add file.\n%s\n%s%s" % (dirpath, filebasename, fileext)) == wx.ID_CANCEL:
                             self.workerRun.clear()
                             break
+                # Commit on Every Dir change, incase we crash
+                self.con.commit()
+                
         self.closeDB()
         self.workerDir.queue.clear()
+        self.workerDir.unfinished_tasks = 0
         self.messageQueue.queue.clear()
+        self.messageQueue.unfinished_tasks = 0
         self.workerRun.clear()
         self.addidQueue.put_nowait(addid)
 
     def onEdit(self, event):
         if self.editButton.GetLabel() == "Cancel":
-            self.displayRecord(self.getId())
+            self.displayRecord(self.getIndex())
             self.enableButtons(True)
         else:
             self.disableButtons(cancel=True)
@@ -720,22 +784,20 @@ class DisplayForm(wx.Frame):
         #Commit the changes after updating the Desc
         self.sql.execute("update docs set desc=?, categoriesid=? where id=?", (self.descText.GetValue(), self.categoryChoice.GetSelection(), self.getId()))
         self.con.commit()
-        if self.addfiles:
+        if len(self.addid):
             newid = self.addid.pop(0)
             if not self.addid:
                 self.enableButtons()
-                self.addfiles = False
             else:
                 self.displayRecord(newid)
         else:
             self.enableButtons(True)
-            self.addfiles = False
 
     def onExit(self, event):
         self.Close(True)
 
     def onClose(self, event):
-        print "Closing..."
+        logging.debug("Closing...")
         self.closeDB()
         self.messageTimer.Stop()
         self.Destroy()
@@ -809,7 +871,7 @@ class DisplayForm(wx.Frame):
 
 class DisplayProgress(wx.ProgressDialog):
     def __init__(self, parent):
-        wx.ProgressDialog.__init__(self, 'Checking Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME|wx.PD_APP_MODAL)
+        wx.ProgressDialog.__init__(self, 'Scanning Files', 'Please wait...',style=wx.PD_CAN_ABORT|wx.PD_ELAPSED_TIME|wx.PD_APP_MODAL)
 
         while parent.thread.isAlive():
             try:
@@ -827,16 +889,18 @@ class DisplayProgress(wx.ProgressDialog):
             except Queue.Empty:
                 (run, skip) = self.Pulse()
             if run == False:
+                self.Pulse("Cancelling, please wait...")
                 if parent.workerRun.isSet():
                     parent.workerRun.clear()
                     parent.workerAbort.set()
-                    parent.messageQueue.queue.clear()
+                    parent.messageQueue.queue.clear()                    parent.messageQueue.unfinished_tasks = 0
                     parent.messageQueue.put_nowait(u"Aborted File Check")
                 else:
-                    print "Aborting..."
-            time.sleep(0.2)
+                    logging.debug("Aborting Scan...")
+            time.sleep(0.1)
         else:
             parent.workerDir.queue.clear()
+            parent.workerDir.unfinished_tasks = 0
         try:
             parent.addid = parent.addidQueue.get_nowait()
             parent.addidQueue.task_done()
@@ -920,7 +984,7 @@ class EditCategories(wx.Dialog):
         self.currentItem = event.m_itemIndex
         self.currentList = event.EventObject.GetLabel()
         self.currentId = self.categoryList.GetItemData(self.currentItem)
-        print "OnItemSelected %s: row %s, id %s, %s" %(self.currentList, self.currentItem, self.currentId, self.categoryList.GetItemText(self.currentItem))
+        logging.debug("OnItemSelected %s: row %s, id %s, %s", self.currentList, self.currentItem, self.currentId, self.categoryList.GetItemText(self.currentItem))
 
     def onDoubleClick(self, event):
         name = event.EventObject.GetLabel()
@@ -929,7 +993,7 @@ class EditCategories(wx.Dialog):
         self.categoryList.EditLabel(self.currentItem)
 
     def onEndEdit(self, event):
-        print "onEndEdit %s: row %s, id %s, %s" % (self.currentList, event.m_itemIndex, self.currentId, event.GetText())
+        logging.debug("onEndEdit %s: row %s, id %s, %s", self.currentList, event.m_itemIndex, self.currentId, event.GetText())
         if self.currentItem == self.lastrow and event.GetText() != '': # Add
             self.lastrow += 1
             newcolor = self.getRamdomColor()
@@ -957,7 +1021,7 @@ class EditCategories(wx.Dialog):
         table = event.EventObject.GrandParent.GetName()
         catid = event.EventObject.GetId()
         colorHexStr = "#%02x%02x%02x" % color.Get()
-        print "onColorCtrl %s: id %s, name %s, color %s" % (table, str(catid), name, colorHexStr)
+        logging.debug("onColorCtrl %s: id %s, name %s, color %s", table, str(catid), name, colorHexStr)
         if table == "categories":
             if name == "color":
                 self.Parent.sql.execute('update categories set color=? where id=?', (colorHexStr, catid))
@@ -971,11 +1035,12 @@ class EditCategories(wx.Dialog):
 
     def getRamdomColor(self):
         randomcolor = "#%x" % (random.randint(1, 16777215))
-        print "New Color: %s" % randomcolor
+        logging.debug("New Color: %s", randomcolor)
         return randomcolor
 
     def onClose(self, event):
         self.Parent.con.commit()
+        logging.shutdown()
         self.Destroy()
 
 class EditSettings(wx.Dialog):
@@ -1031,8 +1096,18 @@ class MyApp(wx.App, wx.lib.mixins.inspection.InspectionMixin):
 
 if __name__ == '__main__':
     try:
-        #application = wx.PySimpleApp(wx.lib.inspection.InspectionTool)
-        #frame = MyFrame(None, "Doci")
+        logging.basicConfig(level=logging.DEBUG,
+                            format='%(name)-8s %(levelname)-8s %(message)s',
+                            datefmt='%Y-%m-%d %H:%M:%S'
+                            )
+        # Defaine a Handler for the Logfile
+        logfile = logging.FileHandler(filename=os.path.splitext(sys.argv[0])[0] + ".log")
+        logfile.setLevel(logging.INFO)
+        logfileformat = logging.Formatter(fmt='%(asctime)s %(name)-8s %(levelname)-8s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        logfile.setFormatter(logfileformat)
+        # add the handler to the root logger
+        logging.getLogger('').addHandler(logfile)
+        
         application = MyApp()
         application.MainLoop()
     finally:
